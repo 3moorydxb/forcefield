@@ -46,8 +46,8 @@ export interface LinkSpec {
   target: string;
   /**
    * Confidence / strength in `[0, 1]`. Scales the spring and, if the renderer
-   * wants it, the stroke. Profiler X's investigation edges use it as confidence;
-   * a strict tree can leave it at 1.
+   * wants it, the stroke. A graded graph uses it as a confidence or relevance
+   * score; a strict tree can leave it at 1.
    */
   weight?: number;
   /** Preferred rest length in world units. Falls back to the link force default. */
@@ -157,7 +157,7 @@ export class Graph {
 
   /**
    * Add a node. Safe to call while the simulation is running — this is the
-   * Profiler X case, where nodes appear as collectors return hits.
+   * streaming case, where nodes arrive one at a time from a running source.
    *
    * A node with no given position is placed near its already-present neighbours
    * if it has any, otherwise on a small disc around the origin. Dropping a new
@@ -561,7 +561,7 @@ function grow64(src: Float64Array, cap: number): Float64Array {
 }
 
 function linkKey(a: string, b: string): string {
-  return a < b ? `${a} ${b}` : `${b} ${a}`;
+  return a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`;
 }
 
 function clamp01(v: number): number {

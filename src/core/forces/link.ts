@@ -18,8 +18,8 @@ import { FLAG_DRAGGING, FLAG_HIDDEN, FLAG_PINNED } from '../graph.js';
  * away and the spring feels limp exactly when the user is watching it. The free
  * end gets all of it instead.
  *
- * `weight` (a link's confidence in an investigation graph) scales the spring, so
- * a speculative edge pulls more weakly than a certain one.
+ * `weight` scales the spring, so on a graded graph a speculative edge pulls more
+ * weakly than a certain one.
  */
 export class LinkForce implements Force {
   readonly name = 'link';

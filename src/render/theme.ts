@@ -97,8 +97,8 @@ export interface Theme {
   /**
    * Optional explicit style buckets, used instead of `palette` when the
    * renderer is given a `styleNode` / `styleLink` classifier. This is the seam a
-   * consumer with real semantics (shapes, a confidence ladder, a quarantine
-   * state) uses — it supplies the meaning, the engine supplies the batching.
+   * consumer with real semantics (shapes, a graded scale, an excluded state)
+   * uses — it supplies the meaning, the engine supplies the batching.
    */
   nodeStyles?: NodeStyle[];
   linkStyles?: LinkStyle[];

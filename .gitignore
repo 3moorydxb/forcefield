@@ -5,7 +5,7 @@ node_modules/
 
 # fixtures generated from a private source (see examples/adapters/README.md).
 # The adapter is committed; the data it produces never is.
-examples/**/*.graph.json
+*.graph.json
 fixtures/
 
 # OS

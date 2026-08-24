@@ -205,20 +205,37 @@ export function makePhysicsPanel(view, opts = {}) {
       push();
     });
 
-    // Hold the temperature for the whole gesture rather than relying on the
-    // per-event reheat. Refcounted in the engine, so this composes with a node
-    // drag happening at the same time.
-    const begin = () => view.simulation.hold(0.3);
+    // Hold the temperature for the whole POINTER gesture rather than relying on
+    // the per-event reheat. Refcounted in the engine, so this composes with a
+    // node drag happening at the same time.
+    //
+    // 🔴 `holding` is not defensive clutter — without it this leaks. Pressing on
+    // an unfocused slider fires BOTH `pointerdown` AND `focus`, so binding hold
+    // to both takes two holds and `pointerup` returns only one. The count never
+    // reaches zero, alphaTarget stays at 0.3, and the graph runs full physics and
+    // redraws forever until focus happens to move elsewhere — the exact opposite
+    // of "an idle graph costs nothing".
+    //
+    // Keyboard is deliberately NOT held: each arrow key fires `input`, and the
+    // one-shot reheat inside setForces is right for a discrete step. It warms,
+    // moves, and settles.
+    let holding = false;
+    const begin = () => {
+      if (holding) return;
+      holding = true;
+      view.simulation.hold(0.3);
+    };
     const end = () => {
+      if (!holding) return;
+      holding = false;
       view.simulation.release();
       save();
     };
     input.addEventListener('pointerdown', begin);
     input.addEventListener('pointerup', end);
     input.addEventListener('pointercancel', end);
-    // Keyboard users get the same thing: focus holds, blur releases.
-    input.addEventListener('focus', begin);
-    input.addEventListener('blur', end);
+    // Persist a keyboard change too, without touching the hold count.
+    input.addEventListener('change', save);
 
     rows[c.key] = { input, value };
 

@@ -34,6 +34,20 @@ export interface Canvas2DOptions {
   /** Draw the debug quadtree overlay. */
   showQuadtree?: boolean;
 
+  /** Where a label sits relative to its node. */
+  labelPlacement?: 'right' | 'below';
+
+  /**
+   * Whether `decorate` draws something that changes over time.
+   *
+   * Defaults to `true` whenever a `decorate` hook is supplied, and that default
+   * is deliberately the SAFE one: the engine cannot inspect a consumer's
+   * callback, and the failure mode of guessing wrong is a pulse that silently
+   * stops the moment the graph settles. Set it to `false` for a static
+   * decoration to get the idle-costs-nothing behaviour back.
+   */
+  decorateAnimates?: boolean;
+
   /**
    * Classify a node into a `theme.nodeStyles` bucket. Return `-1` to fall back
    * to the categorical palette.
@@ -127,6 +141,19 @@ export class Canvas2DRenderer implements Renderer {
     | undefined;
   showQuadtree: boolean;
 
+  /**
+   * Did the LAST frame contain something that animates?
+   *
+   * `GraphView.needsRedraw()` reads this. Without it, `redrawPolicy:
+   * 'on-change'` stops drawing the instant the simulation settles, and any
+   * animation the renderer owns — a selection pulse, marching-ant dashes, a
+   * consumer's decoration — freezes mid-cycle with nothing to say why.
+   */
+  animating = false;
+
+  private readonly labelPlacement: 'right' | 'below';
+  private readonly decorateAnimates: boolean;
+
   // Reused per frame so the frame loop allocates nothing.
   private nodeBuckets: number[][] = [];
   private linkBuckets: number[][] = [];
@@ -154,6 +181,8 @@ export class Canvas2DRenderer implements Renderer {
     this.styleNode = opts.styleNode;
     this.styleLink = opts.styleLink;
     this.decorate = opts.decorate;
+    this.labelPlacement = opts.labelPlacement ?? 'right';
+    this.decorateAnimates = opts.decorateAnimates ?? opts.decorate !== undefined;
   }
 
   /**
@@ -235,6 +264,7 @@ export class Canvas2DRenderer implements Renderer {
     ctx.fillStyle = theme.background;
     ctx.fillRect(0, 0, this.cssWidth, this.cssHeight);
 
+    let animating = false;
     const stats = this.stats;
     stats.nodesDrawn = 0;
     stats.linksDrawn = 0;
@@ -248,7 +278,8 @@ export class Canvas2DRenderer implements Renderer {
 
     // ---------------------------------------------------------------- links
     const wb = this.weightBuckets;
-    ensureBuckets(this.linkBuckets, wb * 2);
+    const linkStyleCount = this.styleLink && theme.linkStyles ? theme.linkStyles.length : 0;
+    ensureBuckets(this.linkBuckets, (linkStyleCount + wb) * 2);
     for (const b of this.linkBuckets) b.length = 0;
     this.activeLinks.length = 0;
 
@@ -273,11 +304,15 @@ export class Canvas2DRenderer implements Renderer {
         continue;
       }
 
+      // Highlighting a touched link repaints it in one flat accent colour, which
+      // destroys any encoding the consumer put ON the link. So it only applies
+      // when the consumer has NOT supplied link styles — explicit styling wins.
       const touched =
-        s === hoverIdx ||
-        t === hoverIdx ||
-        (g.flags[s]! & FLAG_SELECTED) !== 0 ||
-        (g.flags[t]! & FLAG_SELECTED) !== 0;
+        !this.styleLink &&
+        (s === hoverIdx ||
+          t === hoverIdx ||
+          (g.flags[s]! & FLAG_SELECTED) !== 0 ||
+          (g.flags[t]! & FLAG_SELECTED) !== 0);
       stats.linksDrawn++;
       if (touched) {
         this.activeLinks.push(l);
@@ -286,11 +321,15 @@ export class Canvas2DRenderer implements Renderer {
 
       // Bucket so links still batch: an explicit style class when the consumer
       // supplies one, otherwise weight quantised into `weightBuckets` steps.
+      // A `-1` from the classifier means "use the built-in weight buckets". Those
+      // must live in a DISJOINT index range, or bucket 2 would mean both "style 2"
+      // and "weight bucket 2" and the draw loop could not tell them apart.
       const cls = this.styleLink ? this.styleLink(l, g) : -1;
       const q =
         cls >= 0
           ? cls
-          : Math.min(wb - 1, Math.max(0, Math.floor(g.linkWeight[l]! * wb - 1e-9)));
+          : linkStyleCount +
+            Math.min(wb - 1, Math.max(0, Math.floor(g.linkWeight[l]! * wb - 1e-9)));
       const dimmed = dim ? (dim[s] === 0 || dim[t] === 0 ? 1 : 0) : 0;
       ensureBuckets(this.linkBuckets, (q + 1) * 2);
       this.linkBuckets[q * 2 + dimmed]!.push(l);
@@ -303,19 +342,21 @@ export class Canvas2DRenderer implements Renderer {
 
     const linkBucketCount = Math.floor(this.linkBuckets.length / 2);
     for (let q = 0; q < linkBucketCount; q++) {
-      const style = this.styleLink && linkStyles ? linkStyles[q] : undefined;
+      const style = q < linkStyleCount ? linkStyles![q] : undefined;
       for (let d = 0; d < 2; d++) {
         const bucket = this.linkBuckets[q * 2 + d]!;
         if (bucket.length === 0) continue;
         const baseAlpha = style?.alpha ?? 1;
         ctx.globalAlpha = d === 1 ? baseAlpha * theme.dimOpacity : baseAlpha;
         ctx.strokeStyle = style?.color ?? theme.link.color;
-        ctx.lineWidth = style?.width ?? Math.max(0.4, ((q + 1) / wb) * 1.4);
+        ctx.lineWidth =
+          style?.width ?? Math.max(0.4, ((q - linkStyleCount + 1) / wb) * 1.4);
         if (style?.dash) {
           ctx.setLineDash(style.dash);
           if (style.animateDash) {
             const period = style.dash.reduce((a, b) => a + b, 0);
             ctx.lineDashOffset = dashPhase * period;
+            animating = true;
           }
         } else {
           ctx.setLineDash([]);
@@ -348,7 +389,8 @@ export class Canvas2DRenderer implements Renderer {
     }
 
     // ---------------------------------------------------------------- nodes
-    const slots = theme.palette.length + 1; // + "other"
+    const nodeStyleCount = this.styleNode && theme.nodeStyles ? theme.nodeStyles.length : 0;
+    const slots = nodeStyleCount + theme.palette.length + 1; // styles + palette + "other"
     ensureBuckets(this.nodeBuckets, slots * 2);
     for (const b of this.nodeBuckets) b.length = 0;
     this.labelCandidates.length = 0;
@@ -359,32 +401,36 @@ export class Canvas2DRenderer implements Renderer {
       const wy = g.y[i]!;
       if (wx < vb.minX || wx > vb.maxX || wy < vb.minY || wy > vb.maxY) continue;
 
+      // Same disjointness rule as links: an explicit style index and a palette
+      // slot must not be able to name the same bucket.
       const cls = this.styleNode ? this.styleNode(i, g) : -1;
-      let bucket: number;
-      if (cls >= 0) {
-        bucket = cls;
-        ensureBuckets(this.nodeBuckets, (bucket + 1) * 2);
-      } else {
-        const slot = palette.slotOf(g.types[i]!, theme.palette.length);
-        bucket = slot < 0 ? theme.palette.length : slot;
-      }
+      const slot = palette.slotOf(g.types[i]!, theme.palette.length);
+      const fallback = nodeStyleCount + (slot < 0 ? theme.palette.length : slot);
+      const bucket = cls >= 0 ? cls : fallback;
+      ensureBuckets(this.nodeBuckets, (bucket + 1) * 2);
       const dimmed = dim && dim[i] === 0 ? 1 : 0;
       this.nodeBuckets[bucket * 2 + dimmed]!.push(i);
-      if (dimmed === 0) this.labelCandidates.push(i);
+      // Dimmed nodes are still label candidates — going recessive should not mean
+      // going anonymous. They are drawn at the dim opacity further down.
+      this.labelCandidates.push(i);
       stats.nodesDrawn++;
     }
 
     const nodeStyles = theme.nodeStyles;
     const nodeBucketCount = Math.max(slots, Math.floor(this.nodeBuckets.length / 2));
     for (let s = 0; s < nodeBucketCount; s++) {
-      const style = this.styleNode && nodeStyles ? nodeStyles[s] : undefined;
+      const style = s < nodeStyleCount ? nodeStyles![s] : undefined;
       const shape: NodeShape = style?.shape ?? 'circle';
       for (let d = 0; d < 2; d++) {
         const bucket = this.nodeBuckets[s * 2 + d]!;
         if (!bucket || bucket.length === 0) continue;
         ctx.globalAlpha = d === 1 ? theme.dimOpacity : 1;
+        const slotIndex = s - nodeStyleCount;
         ctx.fillStyle =
-          style?.fill ?? (s === theme.palette.length ? theme.other : theme.palette[s] ?? theme.other);
+          style?.fill ??
+          (slotIndex === theme.palette.length
+            ? theme.other
+            : theme.palette[slotIndex] ?? theme.other);
 
         ctx.beginPath();
         for (const i of bucket) {
@@ -409,6 +455,7 @@ export class Canvas2DRenderer implements Renderer {
 
     // Consumer-drawn extra channels, once the fills are down.
     if (this.decorate) {
+      if (this.decorateAnimates) animating = true;
       const info: DecorationInfo = {
         graph: g,
         x: 0,
@@ -439,9 +486,9 @@ export class Canvas2DRenderer implements Renderer {
     }
 
     // ------------------------------------------------------------- overlays
-    // Pins, in one path.
-    ctx.strokeStyle = theme.pin;
-    ctx.lineWidth = 1.25;
+    // Pins, in one path. State is assigned only if the pass actually draws —
+    // setting it for an empty path is a wasted driver flush and it makes
+    // "which colour did we stroke with" unanswerable from the call log.
     ctx.beginPath();
     let pins = 0;
     for (let i = 0; i < n; i++) {
@@ -455,7 +502,11 @@ export class Canvas2DRenderer implements Renderer {
       ctx.arc(px, py, r, 0, TAU);
       pins++;
     }
-    if (pins > 0) ctx.stroke();
+    if (pins > 0) {
+      ctx.strokeStyle = theme.pin;
+      ctx.lineWidth = 1.25;
+      ctx.stroke();
+    }
 
     // Selection ring. The pulse is a real animation with a positive duration and
     // an explicit direction — see `core/direction.ts` for why that is a rule.
@@ -475,7 +526,10 @@ export class Canvas2DRenderer implements Renderer {
       ctx.arc(px, py, r, 0, TAU);
       sel++;
     }
-    if (sel > 0) ctx.stroke();
+    if (sel > 0) {
+      ctx.stroke();
+      animating = true; // the ring breathes
+    }
 
     // Hover ring.
     if (hoverIdx >= 0 && !(g.flags[hoverIdx]! & FLAG_HIDDEN)) {
@@ -494,6 +548,7 @@ export class Canvas2DRenderer implements Renderer {
     // light-mode palette slots sit under 3:1 against the surface, so colour
     // alone is not allowed to be the only thing identifying a node.
     ctx.font = this.font;
+    ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.lineJoin = 'round';
 
@@ -503,8 +558,14 @@ export class Canvas2DRenderer implements Renderer {
       for (let j = 0; j < count; j++) {
         const i = this.labelCandidates[j]!;
         if (i === hoverIdx) continue;
-        this.drawLabel(frame, i, theme.label);
+        const isDim = dim !== null && dim[i] === 0;
+        // A style's own labelColor wins — a consumer that colours a node by
+        // state usually wants its label to say the same thing.
+        const st = this.styleNode && nodeStyles ? nodeStyles[this.styleNode(i, g)] : undefined;
+        ctx.globalAlpha = isDim ? theme.dimOpacity : 1;
+        this.drawLabel(frame, i, st?.labelColor ?? theme.label);
       }
+      ctx.globalAlpha = 1;
     }
     if (hoverIdx >= 0 && !(g.flags[hoverIdx]! & FLAG_HIDDEN)) {
       this.drawLabel(frame, hoverIdx, theme.ink.primary);
@@ -525,6 +586,8 @@ export class Canvas2DRenderer implements Renderer {
     }
 
     if (this.showQuadtree) this.drawQuadtree(frame);
+
+    this.animating = animating;
   }
 
   private drawLabel(frame: RenderFrame, i: number, color: string): void {
@@ -535,12 +598,19 @@ export class Canvas2DRenderer implements Renderer {
     if (px < -80 || py < -20 || px > this.cssWidth + 80 || py > this.cssHeight + 20) return;
     const r = this.screenRadius(g.radius[i]!, camera.k);
     const text = g.labels[i]!;
+    const below = this.labelPlacement === 'below';
+    const tx = below ? px : px + r + 4;
+    const ty = below ? py + r + 7 : py;
+    ctx.textAlign = below ? 'center' : 'left';
+    ctx.textBaseline = below ? 'top' : 'middle';
     // Halo first so text stays readable where it crosses an edge.
     ctx.strokeStyle = theme.labelHalo;
     ctx.lineWidth = 3;
-    ctx.strokeText(text, px + r + 4, py);
+    ctx.strokeText(text, tx, ty);
     ctx.fillStyle = color;
-    ctx.fillText(text, px + r + 4, py);
+    ctx.fillText(text, tx, ty);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
     this.stats.labelsDrawn++;
   }
 

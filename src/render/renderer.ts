@@ -60,5 +60,14 @@ export interface Renderer {
   render(frame: RenderFrame): void;
   /** Counts from the LAST frame. Measured during drawing, not estimated. */
   readonly stats: RenderStats;
+  /**
+   * Did the last frame contain a live animation?
+   *
+   * A renderer owns animations the simulation knows nothing about — a pulsing
+   * selection ring, marching dashes, a consumer's decoration. `GraphView` reads
+   * this so a settled graph keeps drawing while something is genuinely moving,
+   * and stops the moment nothing is.
+   */
+  readonly animating?: boolean;
   destroy(): void;
 }
