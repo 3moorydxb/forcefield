@@ -19,7 +19,8 @@
     "test": "npm run build:test && node --test build-test/test/*.test.js",
     "check": "tsc -p tsconfig.json --noEmit",
     "serve": "python3 -m http.server 8902",
-    "clean": "rm -rf dist build-test"
+    "clean": "rm -rf dist build-test",
+    "prepare": "npm run build"
   },
   "keywords": [
     "graph",
@@ -31,5 +32,7 @@
     "canvas"
   ],
   "dependencies": {},
-  "devDependencies": {}
+  "devDependencies": {
+    "typescript": "^6.0.0"
+  }
 }
