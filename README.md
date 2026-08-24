@@ -86,6 +86,12 @@ simulation state lives in GPU textures and the API takes whole arrays
 rebuilding every buffer. It also brings a luma.gl dependency and needs WebGL2 — and positions
 living on the GPU makes CPU-side hit-testing, labelling and filtering awkward.
 
+**A third data point, worth more than either:** the closest comparable open-source tool — an OSINT
+graph investigation platform — renders its case graph with `react-force-graph-2d`, i.e. **canvas
+plus d3-force**, and runs the layout in a **Web Worker**. It uses React Flow only for its pipeline
+*editor*, where a DOM node per element is the right call. Canvas + a real force simulation is what
+someone solving this exact problem independently arrived at.
+
 **So: the simulation is written here** — that was the actual requirement — and the renderer sits
 behind a `Renderer` interface with a Canvas 2D implementation. At the scale this targets (single-
 digit thousands) Canvas holds frame rate with room to spare and costs no shader compilation, no
