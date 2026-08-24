@@ -18,3 +18,12 @@ fixtures/
 
 # Screenshots are DOCUMENTATION for this repo and are deliberately tracked.
 # (A blanket `*.png` in a parent repo would silently drop them — do not add one.)
+
+# Screenshots that render a private vault (node counts, type names) or name a
+# private product. Kept on disk, out of the public tree. See shots/README if unsure:
+# the publishable model is barnes-hut-quadtree.png — fully synthetic.
+shots/obsidian-vs-engine.png
+shots/hierarchy-2864-nodes.png
+shots/branch-dim-mode.png
+shots/live-physics-panel.png
+shots/profiler-x-on-the-engine.png
