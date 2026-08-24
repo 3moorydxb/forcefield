@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>graph-engine — hierarchy, real data</title>
+<title>forcefield — hierarchy, real data</title>
 <style id="base"></style>
 </head>
 <body>
@@ -116,7 +116,7 @@ const showing = el('p', { class: 'status' }, '');
 // read against. Dragging one reflows the running graph; nothing restarts.
 const physicsSection = el('section');
 physicsSection.appendChild(el('h2', {}, 'forces'));
-const physics = makePhysicsPanel(view, { storageKey: 'graph-engine:physics:tree' });
+const physics = makePhysicsPanel(view, { storageKey: 'forcefield:physics:tree' });
 physicsSection.appendChild(physics.box);
 panel.appendChild(physicsSection);
 

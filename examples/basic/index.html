@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>graph-engine — synthetic graph</title>
+<title>forcefield — synthetic graph</title>
 <style id="base"></style>
 </head>
 <body>
@@ -71,7 +71,7 @@ function rebuild() {
 
 // ---------------------------------------------------------------- controls
 const panel = el('div', { class: 'panel' });
-panel.appendChild(el('h1', {}, 'graph-engine'));
+panel.appendChild(el('h1', {}, 'forcefield'));
 panel.appendChild(el('p', { class: 'sub' }, 'synthetic graph · reproducible from a seed'));
 
 const sizeSection = el('section');
@@ -102,7 +102,7 @@ panel.appendChild(filterSection);
 
 const forceSection = el('section');
 forceSection.appendChild(el('h2', {}, 'forces'));
-const physics = makePhysicsPanel(view, { storageKey: 'graph-engine:physics:basic' });
+const physics = makePhysicsPanel(view, { storageKey: 'forcefield:physics:basic' });
 forceSection.appendChild(physics.box);
 forceSection.appendChild(el('div', { style: { height: '8px' } }));
 forceSection.appendChild(control('theta', slider({

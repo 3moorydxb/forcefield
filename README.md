@@ -1,4 +1,4 @@
-# graph-engine
+# forcefield
 
 A force-directed graph engine: Barnes-Hut many-body simulation, velocity-Verlet integration,
 drag / pin / filter / zoom, behind a swappable renderer interface.
@@ -42,7 +42,7 @@ hierarchy this was tested against, the stored coordinates only covered 55% of th
 ## Quick start
 
 ```ts
-import { GraphView, Filters } from 'graph-engine';
+import { GraphView, Filters } from 'forcefield';
 
 const view = new GraphView({ container: document.getElementById('app')! });
 

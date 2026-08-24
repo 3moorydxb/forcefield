@@ -125,7 +125,7 @@ export class GraphView {
       // Reported, not swallowed. A link to a node that is not in the file is a
       // hole in the data, and a silently dropped edge looks like a real gap in
       // the structure.
-      console.warn(`graph-engine: ${skipped} link(s) named a node not present in the data`);
+      console.warn(`forcefield: ${skipped} link(s) named a node not present in the data`);
     }
     this.palette.assignFrom(this.graph);
     this.simulation.restart(opts.alpha ?? 1);

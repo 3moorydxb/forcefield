@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Adapter: a folder of markdown notes → a graph-engine JSON file.
+ * Adapter: a folder of markdown notes → a forcefield JSON file.
  *
  * THIS IS AN EXAMPLE, NOT PART OF THE ENGINE. It lives under `examples/` on
  * purpose: it knows about markdown, wikilinks and frontmatter, and the engine

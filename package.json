@@ -1,5 +1,5 @@
 {
-  "name": "graph-engine",
+  "name": "forcefield",
   "version": "0.1.0",
   "description": "A dependency-free force-directed graph engine: Barnes-Hut many-body simulation, velocity-Verlet integration, drag/pin/filter/zoom, behind a swappable renderer interface.",
   "type": "module",
@@ -10,9 +10,15 @@
     "./render": "./dist/render/index.js"
   },
   "types": "./dist/index.d.ts",
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "sideEffects": false,
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "build:test": "tsc -p tsconfig.test.json",
@@ -31,7 +37,6 @@
     "visualization",
     "canvas"
   ],
-  "dependencies": {},
   "devDependencies": {
     "typescript": "^6.0.0"
   }

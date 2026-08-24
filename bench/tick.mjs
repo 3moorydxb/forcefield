@@ -79,7 +79,7 @@ for (const n of SIZES) {
 
 const pad = (s, w) => String(s).padStart(w);
 console.log('');
-console.log('graph-engine — simulation cost per tick (median), no rendering');
+console.log('forcefield — simulation cost per tick (median), no rendering');
 console.log(`ticks sampled: ${TICKS} · node ${process.version} · ${process.platform}/${process.arch}`);
 console.log('');
 console.log(

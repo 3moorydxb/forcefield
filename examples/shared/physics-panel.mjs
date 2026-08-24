@@ -123,7 +123,7 @@ export const CONTROLS = [
   },
 ];
 
-const STORAGE_KEY = 'graph-engine:physics';
+const STORAGE_KEY = 'forcefield:physics';
 
 /** Slider positions -> engine `PhysicsSettings`. */
 export function positionsToSettings(positions) {

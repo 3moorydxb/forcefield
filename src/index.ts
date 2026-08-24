@@ -1,5 +1,5 @@
 /**
- * graph-engine — a dependency-free force-directed graph engine.
+ * forcefield — a dependency-free force-directed graph engine.
  *
  * Nothing in this package knows what a node means. There is no node type, no
  * colour and no filter here that belongs to any one product; a consumer supplies
