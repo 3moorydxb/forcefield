@@ -40,7 +40,7 @@
  * rather than on a number someone eyeballed.
  */
 
-import { expoResponse, expoPosition, DEFAULT_PHYSICS } from '../../dist/index.js';
+import { expoResponse, expoPosition, DEFAULT_PHYSICS } from '../../dist/src/index.js';
 import { el } from './ui.mjs';
 
 /**

@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- an empty data: URI, so a demo page does not log a 404 for a favicon nobody shipped -->
+<link rel="icon" href="data:,">
 <title>forcefield — synthetic graph</title>
 <style id="base"></style>
 </head>
@@ -10,8 +12,8 @@
 <div id="app"></div>
 
 <script type="module">
-import { GraphView, Filters, darkTheme, lightTheme, Rng } from '../../dist/index.js';
-import { BASE_CSS, el, makeHud, makeLegend, control, slider, button, checkbox } from '../shared/ui.mjs';
+import { GraphView, Filters, darkTheme, themes, Rng } from '../../dist/src/index.js';
+import { BASE_CSS, el, makeHud, makeLegend, control, slider, button, checkbox, themeSelect } from '../shared/ui.mjs';
 import { makePhysicsPanel } from '../shared/physics-panel.mjs';
 
 document.getElementById('base').textContent = BASE_CSS;
@@ -134,11 +136,7 @@ const actions = el('section');
 actions.appendChild(el('h2', {}, 'actions'));
 actions.appendChild(button('fit', () => view.fit()));
 actions.appendChild(button('reheat', () => view.simulation.reheat(1)));
-actions.appendChild(button('theme', () => {
-  view.theme = view.theme.name === 'dark' ? lightTheme : darkTheme;
-  document.body.style.background = view.theme.background;
-  legend.rebuild();
-}));
+actions.appendChild(themeSelect(view, themes, () => legend.rebuild()));
 panel.appendChild(actions);
 
 panel.appendChild(el('p', { class: 'hint' }, [

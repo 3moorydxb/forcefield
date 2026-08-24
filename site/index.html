@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- an empty data: URI, so a demo page does not log a 404 for a favicon nobody shipped -->
+<link rel="icon" href="data:,">
+<title>forcefield — a dependency-free force-directed graph engine</title>
+<meta name="description" content="forcefield: a zero-dependency force-directed graph engine for the browser. Barnes-Hut many-body simulation, velocity-Verlet integration, drag/pin/filter/zoom, behind a swappable Canvas 2D renderer. MIT licensed.">
+<meta property="og:title" content="forcefield — a dependency-free force-directed graph engine">
+<meta property="og:description" content="Barnes-Hut simulation, drag/pin/filter/zoom, zero dependencies. 2,864 nodes at 60fps in the browser.">
+<meta property="og:image" content="https://3moorydxb.github.io/forcefield/shots/obsidian-vs-forcefield.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+
+<!--
+  This page is the one thing guaranteed to render even if the build is broken
+  or `dist/` 404s — that failure is the whole reason this job exists (see
+  .github/workflows/pages.yml). So: pure HTML + inline CSS, nothing imported
+  from `dist/`, no webfont fetch, no third-party beacon on load. If this page
+  is blank, the repo itself is down, not just the demo build.
+-->
+<style>
+  :root {
+    --bg: #1a1a19;
+    --panel: #221f1e;
+    --border: #383835;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --ink-muted: #898781;
+    --accent: #3987e5;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink-2);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  }
+  a { color: var(--accent); }
+  code, .mono { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+  main { max-width: 760px; margin: 0 auto; padding: 48px 20px 80px; }
+
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+    margin-bottom: 6px; flex-wrap: wrap; }
+  h1 { margin: 0; font-size: 28px; letter-spacing: -0.01em; color: var(--ink); }
+  .version { font: 12px ui-monospace, monospace; color: var(--ink-muted); border: 1px solid var(--border);
+    border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
+  .tagline { margin: 0 0 36px; color: var(--ink-muted); font-size: 15px; max-width: 56ch; }
+
+  figure { margin: 0 0 40px; }
+  figure img { width: 100%; height: auto; display: block; border-radius: 10px; border: 1px solid var(--border); }
+  figcaption { margin-top: 10px; font-size: 13px; color: var(--ink-muted); }
+  figcaption strong { color: var(--ink-2); font-weight: 600; }
+
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .09em; color: var(--ink-muted);
+    font-weight: 600; margin: 0 0 12px; }
+
+  .demos { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 40px; }
+  .demo-card { display: block; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--panel); text-decoration: none; color: inherit; transition: border-color .1s ease; }
+  .demo-card:hover { border-color: var(--accent); }
+  .demo-card .name { display: block; color: var(--ink); font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+  .demo-card .desc { display: block; color: var(--ink-muted); font-size: 12.5px; line-height: 1.5; }
+
+  .facts { list-style: none; margin: 0 0 40px; padding: 0; display: grid; gap: 8px; }
+  .facts li { padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel);
+    font-size: 13.5px; color: var(--ink-2); }
+  .facts strong { color: var(--ink); }
+
+  .limits { margin: 0 0 40px; font-size: 13.5px; color: var(--ink-muted); }
+
+  footer { border-top: 1px solid var(--border); padding-top: 20px; font-size: 12.5px; color: var(--ink-muted); }
+  footer a { color: var(--ink-2); }
+
+  @media (max-width: 560px) {
+    main { padding: 32px 16px 60px; }
+    h1 { font-size: 24px; }
+    .demos { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+  <header>
+    <h1>forcefield</h1>
+    <span class="version mono">v0.1.0</span>
+  </header>
+  <p class="tagline">
+    A dependency-free force-directed graph engine: Barnes-Hut many-body simulation,
+    velocity-Verlet integration, drag / pin / filter / zoom, behind a swappable
+    Canvas 2D renderer. TypeScript in, ESM out, nothing in <code>node_modules</code>.
+  </p>
+
+  <figure>
+    <img src="shots/obsidian-vs-forcefield.png" alt="An Obsidian graph view next to the same hierarchy rendered by forcefield" width="2432" height="1530" loading="eager">
+    <figcaption>
+      Same hierarchy, two renderers. Live in the <a href="examples/tree/">tree demo</a>:
+      <strong>2,864 nodes at 60fps</strong>, 59.2 1%-low, measured in-browser — not a screenshot claim.
+    </figcaption>
+  </figure>
+
+  <section>
+    <h2>Try it — one click, drag anything</h2>
+    <div class="demos">
+      <a class="demo-card" href="examples/basic/">
+        <span class="name">basic</span>
+        <span class="desc">Synthetic graph from a seed. Anyone can reproduce it — no data required.</span>
+      </a>
+      <a class="demo-card" href="examples/tree/">
+        <span class="name">tree</span>
+        <span class="desc">A large hierarchy with saved positions used as a starting state, not a final answer.</span>
+      </a>
+      <a class="demo-card" href="examples/live/">
+        <span class="name">live</span>
+        <span class="desc">Nodes inserted one at a time into a running simulation. No pre-computed layout.</span>
+      </a>
+      <a class="demo-card" href="bench/">
+        <span class="name">bench</span>
+        <span class="desc">Fixed-protocol in-browser frame benchmark. No eyeballing.</span>
+      </a>
+    </div>
+  </section>
+
+  <section>
+    <h2>Measured, not claimed</h2>
+    <ul class="facts">
+      <li><strong>1,651 nodes</strong> — sim 2.662ms / frame 3.025ms per tick.</li>
+      <li><strong>2,864 nodes</strong> — 60fps sustained, 59.2 1%-low, in-browser.</li>
+      <li><strong>99 tests</strong>, <code>node:test</code>, zero dependencies.</li>
+    </ul>
+  </section>
+
+  <p class="limits">
+    Built for single-digit-thousands of nodes in a browser tab, not hundreds of thousands on a
+    GPU — past roughly 100k nodes a GPU-backed engine wins on brute force alone, and this repo
+    says so rather than pretending otherwise.
+  </p>
+
+  <footer>
+    MIT licensed. <a href="https://github.com/3moorydxb/forcefield">github.com/3moorydxb/forcefield</a>
+  </footer>
+
+</main>
+</body>
+</html>

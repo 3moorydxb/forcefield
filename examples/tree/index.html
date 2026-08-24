@@ -3,15 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>forcefield — hierarchy, real data</title>
+<!-- an empty data: URI, so a demo page does not log a 404 for a favicon nobody shipped -->
+<link rel="icon" href="data:,">
+<title>forcefield — hierarchy</title>
 <style id="base"></style>
 </head>
 <body>
 <div id="app"></div>
 
 <script type="module">
-import { GraphView, Filters, darkTheme, lightTheme } from '../../dist/index.js';
-import { BASE_CSS, el, makeHud, makeLegend, control, slider, button, checkbox } from '../shared/ui.mjs';
+import { GraphView, Filters, darkTheme, themes } from '../../dist/src/index.js';
+import { BASE_CSS, el, makeHud, makeLegend, control, slider, button, checkbox, themeSelect } from '../shared/ui.mjs';
 import { makePhysicsPanel } from '../shared/physics-panel.mjs';
 
 document.getElementById('base').textContent = BASE_CSS;
@@ -21,11 +23,16 @@ const app = document.getElementById('app');
  * The hierarchy case: a large tree whose coordinates were saved by something
  * else, loaded as a STARTING STATE rather than a final answer.
  *
- * The data file is produced by `examples/adapters/markdown-tree.mjs` and is
- * .gitignored — it is one person's notes. Run the adapter against any folder of
- * markdown with a parent field and this page works unchanged.
+ * The default, `demo.graph.json`, comes from a SYNTHETIC vault — run
+ * `npm run demo:data` locally, or let the Pages workflow do it on deploy. It is
+ * `.gitignore`d either way: the adapter is committed, the data it produces
+ * never is, and no private notes ship with this repo or this page.
+ *
+ * Pass `?data=` to point the page at your own vault's export instead. Any
+ * folder of markdown whose notes name a parent works — see
+ * `examples/adapters/README.md`.
  */
-const DATA = new URLSearchParams(location.search).get('data') ?? 'edith.graph.json';
+const DATA = new URLSearchParams(location.search).get('data') ?? 'demo.graph.json';
 
 const view = new GraphView({
   container: app,
@@ -66,9 +73,23 @@ for (let pass = 0; pass < 6; pass++) {
 view.fit();
 view.fitWhenSettled();
 
+/**
+ * Count the saved coordinates from the DATA, not from the length of
+ * `meta.unpositioned`.
+ *
+ * That list is only populated when the adapter is given a `--positions` file,
+ * so on the synthetic demo — which has no saved coordinates at all — it is
+ * empty, and `nodeCount - unplaced.length` read as "2864 with saved positions"
+ * about a graph the simulation had just laid out from nothing. The status line
+ * was stating the exact opposite of the truth, which is worse than not having
+ * one.
+ */
+const saved = data.nodes.filter((n) => Number.isFinite(n.x) && Number.isFinite(n.y)).length;
 status.textContent =
   `${view.graph.nodeCount} nodes · ${view.graph.linkCount} links · ` +
-  `${view.graph.nodeCount - unplaced.length} with saved positions, ${unplaced.length} laid out here`;
+  (saved === 0
+    ? 'no saved coordinates, laid out entirely by the simulation'
+    : `${saved} with saved positions, ${view.graph.nodeCount - saved} laid out here`);
 
 // ------------------------------------------------------------------ filters
 let branchRoot = null;
@@ -143,11 +164,7 @@ const actions = el('section');
 actions.appendChild(el('h2', {}, 'actions'));
 actions.appendChild(button('fit', () => view.fit()));
 actions.appendChild(button('reheat', () => view.simulation.reheat(0.6)));
-actions.appendChild(button('theme', () => {
-  view.theme = view.theme.name === 'dark' ? lightTheme : darkTheme;
-  document.body.style.background = view.theme.background;
-  legend.rebuild();
-}));
+actions.appendChild(themeSelect(view, themes, () => legend.rebuild()));
 panel.appendChild(actions);
 
 panel.appendChild(el('p', { class: 'hint' }, [

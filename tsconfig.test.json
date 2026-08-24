@@ -8,5 +8,5 @@
     "noUnusedLocals": false,
     "types": []
   },
-  "include": ["src", "test"]
+  "include": ["src", "themes", "test"]
 }

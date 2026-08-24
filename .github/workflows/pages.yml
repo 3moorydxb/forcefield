@@ -1,0 +1,173 @@
+name: pages
+
+# The bug this workflow exists to not repeat: `dist/` is .gitignored and every
+# example imports from it, so turning on Pages without a build step ships a
+# blank page that still returns HTTP 200 — a green Actions run and a 200 are
+# NOT evidence the demo works. The guard step at the end of `build` checks the
+# actual failure mode (a 404'd module import), not just "did the job exit 0".
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # `npm ci` and not `npm install`: the lockfile is committed, so CI resolves
+      # the one devDependency to the exact version the author built against
+      # rather than to whatever `^6` means on the day the job runs. There are no
+      # runtime dependencies to pin — that is the whole point of the package.
+      - name: install
+        run: npm ci --no-audit --no-fund
+
+      - name: build
+        run: npm run build
+
+      # The deploy must not ship a tree whose tests fail — a green build with a
+      # broken engine is worse than no deploy at all.
+      - name: test
+        run: npm test
+
+      # Generate the tree demo's data file from a SYNTHETIC vault, never from a
+      # real one. The intermediate markdown lives under $RUNNER_TEMP so it never
+      # touches the repo tree (nothing generated here can accidentally get
+      # committed or leak into the Pages artifact by being left lying around).
+      #
+      # `synthetic-vault.mjs` was written in parallel by another agent while this
+      # workflow was authored; the flags below were guessed at the interface
+      # (`--out`, `--notes`, `--seed`) and later checked directly against the
+      # file on disk once it landed — they match its real `parseArgs`/`toInt`
+      # defaults (2864 notes, seed 20260824). It also refuses to write into a
+      # non-empty directory without `--force`, which is fine here since
+      # $RUNNER_TEMP starts empty each run.
+      - name: generate demo graph (synthetic vault, never real data)
+        run: |
+          set -eu
+          VAULT="${RUNNER_TEMP}/ff-synthetic-vault"
+          node examples/adapters/synthetic-vault.mjs --out "$VAULT" --notes 2864 --seed 20260824
+          node examples/adapters/markdown-tree.mjs --vault "$VAULT" --out examples/tree/demo.graph.json
+
+      # Assemble the deployed tree. Depth arithmetic, verified by hand before
+      # this was written (see the job's own report): `_site/examples/basic/
+      # index.html` imports `../../dist/src/index.js`, which from
+      # `_site/examples/basic/` resolves up two levels to `_site/` then into
+      # `dist/src/index.js` — i.e. `_site/dist/src/index.js`, which is exactly
+      # where `cp -R dist _site/dist` below puts it. Same arithmetic for
+      # `bench/index.html`'s `../dist/src/index.js` against `_site/bench/`.
+      #
+      # `shots/` is copied as an EXPLICIT ALLOWLIST, not wholesale. Several of
+      # the tracked screenshots were captured against a private vault and have
+      # its file name and its category names rendered into the pixels, where no
+      # text scan can reach them. Those stay in the repo (they are the record of
+      # how the engine was developed and removing them is the owner's call) but
+      # they are not served from the public demo. A new shot only reaches the
+      # site by being named here, which is the safe default direction.
+      - name: assemble _site
+        run: |
+          set -eu
+          mkdir -p _site _site/shots
+          cp site/index.html _site/index.html
+          cp -R dist _site/dist
+          cp -R examples _site/examples
+          cp -R bench _site/bench
+          for shot in obsidian-vs-forcefield.png barnes-hut-quadtree.png drag-mid-gesture.png live-insertion.png; do
+            cp "shots/$shot" "_site/shots/$shot"
+          done
+
+      # A silent miss here is exactly the failure class this repo keeps
+      # hitting (blank page, 200 status, nobody notices). Fail loud instead.
+      - name: guard — verify the artifact can actually work
+        run: |
+          set -eu
+
+          if [ ! -f "_site/dist/src/index.js" ]; then
+            echo "guard failed: _site/dist/src/index.js is missing — the built entry point did not make it into the artifact"
+            exit 1
+          fi
+
+          if [ ! -f "_site/examples/tree/demo.graph.json" ]; then
+            echo "guard failed: _site/examples/tree/demo.graph.json is missing"
+            exit 1
+          fi
+
+          node -e '
+            const fs = require("fs");
+            const data = JSON.parse(fs.readFileSync("_site/examples/tree/demo.graph.json", "utf8"));
+            const n = Array.isArray(data.nodes) ? data.nodes.length : 0;
+            console.log("demo.graph.json node count: " + n);
+            if (n < 2000) {
+              console.error("guard failed: demo.graph.json has " + n + " nodes, needs >= 2000");
+              process.exit(1);
+            }
+          '
+
+          # No graph data ships except the one this job generated. Written as an
+          # allowlist rather than as a list of forbidden file names, because a
+          # guard that protects a private file by naming it publishes the very
+          # thing it is guarding.
+          STRAY="$(find _site -name '*.graph.json' ! -name 'demo.graph.json')"
+          if [ -n "$STRAY" ]; then
+            echo "guard failed: a graph file other than the generated demo is in the artifact:"
+            echo "$STRAY"
+            exit 1
+          fi
+
+          # Only the allowlisted screenshots may ship.
+          STRAYSHOT="$(find _site/shots -type f ! -name 'obsidian-vs-forcefield.png' ! -name 'barnes-hut-quadtree.png' ! -name 'drag-mid-gesture.png' ! -name 'live-insertion.png')"
+          if [ -n "$STRAYSHOT" ]; then
+            echo "guard failed: a screenshot outside the allowlist is in the artifact:"
+            echo "$STRAYSHOT"
+            exit 1
+          fi
+
+          # The bug this whole workflow exists to prevent, checked directly:
+          # any page still pointing at a pre-rootDir-change import path would
+          # 404 the module and mount nothing, while still serving 200.
+          #
+          # 🔴 This grep deliberately has NO --include filter and no leading
+          # `../../`. The first version of it had both, and it was blind to the
+          # file that actually broke: `examples/shared/physics-panel.mjs` is not
+          # an .html file, so `--include='*.html'` skipped it, and the workflow
+          # would have deployed two blank pages behind a green check. `-a` is
+          # there for the same class of reason — grep silently skips a file it
+          # decides is binary, and this repo has already had one NUL byte turn a
+          # source file into a "clean" scan of a file that was never opened.
+          STALE="$(grep -ralE 'dist/(index\.js|core/|util/|render/|interaction/|graphView)' _site --exclude-dir=dist || true)"
+          if [ -n "$STALE" ]; then
+            echo "guard failed: these files still import a pre-rootDir-change dist path (must be dist/src/... or dist/themes/...):"
+            echo "$STALE"
+            grep -anE 'dist/(index\.js|core/|util/|render/|interaction/|graphView)' $STALE || true
+            exit 1
+          fi
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

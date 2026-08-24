@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- an empty data: URI, so a demo page does not log a 404 for a favicon nobody shipped -->
+<link rel="icon" href="data:,">
 <title>forcefield — benchmark</title>
 <style>
   html, body { margin: 0; height: 100%; background: #1a1a19; color: #c3c2b7;
@@ -18,7 +20,7 @@
 <pre id="out">starting…</pre>
 
 <script type="module">
-import { GraphView, Rng } from '../dist/index.js';
+import { GraphView, Rng } from '../dist/src/index.js';
 
 /**
  * Fixed-protocol benchmark. No eyeballing.

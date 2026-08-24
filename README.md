@@ -1,5 +1,15 @@
 # forcefield
 
+**[Live demo →](https://3moorydxb.github.io/forcefield/)** — drag a node, switch the theme, 2,864
+nodes at 60fps, right in the browser.
+
+![An Obsidian graph view next to the same hierarchy rendered by forcefield](shots/obsidian-vs-forcefield.png)
+
+*Same hierarchy, same four settings, side by side — not a benchmark win, just a well-known app's
+graph view next to this engine's on identical data. What it actually shows: 2,864 nodes at 60fps in
+the browser, measured live, not a screenshot claim. (Captured before the rename, so the right-hand
+panel is still labelled `graph-engine`.)*
+
 A force-directed graph engine: Barnes-Hut many-body simulation, velocity-Verlet integration,
 drag / pin / filter / zoom, behind a swappable renderer interface.
 
@@ -8,14 +18,33 @@ drag / pin / filter / zoom, behind a swappable renderer interface.
 
 ```bash
 npm run build      # tsc
-npm test           # 46 tests, node:test
+npm test           # 99 tests, node:test
 npm run serve      # http://localhost:8902/examples/basic/
 ```
 
-![Barnes-Hut quadtree over 1,651 nodes](shots/barnes-hut-quadtree.png)
+---
 
-*1,651 nodes, 2,310 links, with the Barnes-Hut subdivision drawn. Cells subdivide only where
-nodes are dense — that is the O(n log n).*
+## Install
+
+Not on npm yet. Until it is, the honest way to depend on it is a git install:
+
+```bash
+npm i github:3moorydxb/forcefield
+```
+
+That runs `prepare` (`npm run build`) as part of the install — the one devDependency,
+`typescript`, compiles `dist/` right there, so a git install ends up with exactly the `dist/` a
+published package would ship. Newer npm versions print an `allow-scripts`-style warning when a git
+dependency runs a lifecycle script on install; that script is `prepare`, and it is what produces
+`dist/` — let it run. **Committing `dist/` to make the warning go away is not the fix.** This
+repo's own Pages workflow exists because `dist/` being gitignored once meant a build step got
+skipped and the demo shipped blank — the fix there was "always build first", never "check in the
+output". Same principle here: build on install, don't let a compiled copy drift out of sync with
+the source that produced it.
+
+```bash
+npm i forcefield   # once published
+```
 
 ---
 
@@ -42,7 +71,7 @@ hierarchy this was tested against, the stored coordinates only covered 55% of th
 ## Quick start
 
 ```ts
-import { GraphView, Filters } from 'forcefield';
+import { GraphView, Filters, themeByName } from 'forcefield';
 
 const view = new GraphView({ container: document.getElementById('app')! });
 
@@ -59,6 +88,10 @@ view.filter(Filters.branch('a', { direction: 'out', maxDepth: 3 }));
 
 // Or keep it on screen and push it back instead.
 view.highlight(Filters.branch('a', { direction: 'out' }));
+
+// Switch themes at runtime. Setting `.theme` marks the frame dirty itself —
+// no separate invalidate() call needed.
+view.theme = themeByName('light')!;
 ```
 
 `GraphView` is optional glue. `Simulation`, `Canvas2DRenderer` and `InteractionController` are
@@ -146,6 +179,9 @@ measured call returns.
 That finding is why `GraphView.redrawPolicy` defaults to `'on-change'`: a settled graph with
 nothing hovered and nothing selected **skips the draw entirely**, so idling costs nothing at all.
 
+On the live demo, with GPU acceleration available, the same 2,864-node hierarchy holds **60fps
+sustained, 59.2 1%-low** — the number the demo link at the top is quoting.
+
 ---
 
 ## What it does
@@ -163,6 +199,11 @@ interface.
 Alpha decays geometrically and the graph settles. `reheat()` wakes it. `alphaTarget` **holds** it
 warm — that distinction is what makes a drag feel alive rather than going limp halfway through the
 gesture.
+
+![Barnes-Hut quadtree over 1,651 nodes](shots/barnes-hut-quadtree.png)
+
+*1,651 nodes, 2,310 links, with the Barnes-Hut subdivision drawn. Cells subdivide only where
+nodes are dense — that is the O(n log n).*
 
 ### Pinning
 A pinned node does not integrate, but it stays in the quadtree and stays on both ends of its
@@ -184,18 +225,26 @@ alpha byte-identical.
 `filter()` removes; `highlight()` dims. Different questions: *show me only this branch* versus
 *where does this branch sit in the whole thing*.
 
-![dim mode](shots/branch-dim-mode.png)
+Both are in the tree demo: click a node to isolate its subtree, tick **dim instead of hide** to see
+the same branch in context.
 
 ### Rendering
 Canvas 2D, behind an interface. Everything sharing a style goes into one path and is stroked or
 filled once — thousands of driver state changes become about twenty. Off-screen nodes are culled;
 labels are capped, gated on zoom, and chosen by degree.
 
-The default palette is a **brand-neutral placeholder**, validated colourblind-safe (worst adjacent
-pair ΔE 8.4 protan on dark). On dark all eight slots clear 3:1 against the surface; on light three
-do not, which is why the hovered node always gets a label and the examples ship a legend —
-identity is never carried by colour alone. Replace `Theme.palette` with your own and nothing else
-changes.
+Three themes ship — `dark` (the default), `light`, `midnight-glow` — and each is validated at
+module load against a seven-rule contract: palette shape, WCAG contrast floors on every text and
+chrome colour, and (the rule with the teeth) that no two style buckets are ever distinguished by
+colour alone. A theme that fails the contract does not fail quietly; the package fails to import.
+`view.theme = themeByName('light')` swaps at runtime — the examples' theme picker does exactly
+that, plus re-deriving the page's own chrome from the theme and remembering the choice. See
+`themes/README.md` for the contract and how to add a theme.
+
+The default (`dark`) palette is validated colourblind-safe (worst adjacent pair ΔE 8.4 protan). On
+dark all eight slots clear 3:1 against the surface; on light three do not, which is why the
+hovered node always gets a label and the examples ship a legend — identity is never carried by
+colour alone. Replace `Theme.palette` with your own and nothing else changes.
 
 Types are assigned palette slots **in fixed order over the whole graph, never cycled**, so
 filtering down to three types does not repaint them, and a ninth type folds into `other` rather
@@ -238,10 +287,63 @@ npm run build && npm run serve
   anyone with no data at all. Size, forces, θ, quadtree overlay, filtering.
 - `/examples/live/` — nodes inserted one at a time into a running simulation, confidence-weighted
   edges. ![live](shots/live-insertion.png)
-- `/examples/tree/` — a large real hierarchy. Needs a data file; see
-  `examples/adapters/README.md`. The file it reads is `.gitignore`d.
+- `/examples/tree/` — a large hierarchy. Defaults to a **synthetic** 2,864-note vault built from a
+  fixed seed, so the demo ships with no private data and is reproducible by anyone. `npm run serve`
+  does not generate it — run this once first:
 
-![hierarchy](shots/hierarchy-2864-nodes.png)
+  ```bash
+  npm run demo:data     # synthetic-vault.mjs → markdown-tree.mjs → examples/tree/demo.graph.json
+  ```
+
+  Pass `?data=your-export.graph.json` to point it at your own vault's export instead — see
+  `examples/adapters/README.md`. Any `*.graph.json` you generate is `.gitignore`d, same as always.
+
+---
+
+## Themes
+
+Ships three (`dark`, `light`, `midnight-glow`); adding a fourth is documented start-to-finish in
+`themes/README.md` — that folder is the whole contribution surface, and nothing in it depends on
+`src/`. The contract's own rule, in one sentence: **state is glyph + word + colour, never colour
+alone.**
+
+---
+
+## Adapters — pluggable into anything
+
+`type` and `data` on a node or link are the consumer's own vocabulary — the engine assigns `type` a
+palette slot and lets you filter by it, and never reads `data` at all. Whatever turns a real source
+into `{ nodes, links }` is an adapter, and adapters live entirely in `examples/`, never in `src/`:
+the engine stays at zero dependencies while an adapter is free to take its own.
+
+Three ship:
+
+- `markdown-tree.mjs` — a folder of markdown notes, each naming its parent with a wikilink.
+- `synthetic-vault.mjs` — writes a synthetic markdown vault to disk from a seed, so the tree demo
+  (and its benchmark) don't depend on anyone's real notes.
+- `codebase.mjs` — an import graph of a codebase, via `dependency-cruiser`. **Scope: TypeScript and
+  JavaScript only** — "any codebase" would be a later claim, this is the first one.
+
+See `examples/adapters/README.md` for the exact field contract and how to write your own in five
+steps.
+
+---
+
+## What v0.1.0 does not do
+
+Honest about the edges, not just the strengths:
+
+- **No WebGL renderer.** `Renderer` is an interface for exactly this reason, but only the Canvas 2D
+  implementation exists — the seam is real, the second backend is not written.
+- **No worker-thread simulation.** The tick runs on the main thread; a very large graph competes
+  with layout and paint for the same frame budget.
+- **`Canvas2DRenderer` and `InteractionController` have no unit tests.** They're exercised in the
+  browser and verified by screenshot (see `shots/`), which catches what a human eye catches and
+  nothing else — weaker than a real test.
+- **Touch is tested only via synthetic pointer events**, not a real device. Pinch and two-finger
+  pan work in that harness; nobody has put a phone on it yet.
+- Past ~100k nodes the honest answer is still cosmos.gl, not this — see "Why this and not sigma.js
+  or cosmograph" above.
 
 ---
 
@@ -249,15 +351,28 @@ npm run build && npm run serve
 
 ```
 src/core/        graph · quadtree · simulation · filter · direction · forces/
-src/render/      renderer interface · canvas2d · camera · theme
+src/render/      renderer interface · canvas2d · camera · theme (re-exports themes/)
 src/interaction/ controller
 src/graphView.ts optional glue: view + loop
+themes/          the Theme contract + dark/light/midnight-glow — the whole contribution surface
 examples/        example pages and adapters — NOT part of the engine
 bench/           headless tick benchmark + in-browser frame benchmark
-test/            46 tests, node:test, no dependencies
+test/            99 tests, node:test, no dependencies
+site/            static Pages landing — no imports from dist/, so it renders even if the build breaks
+.github/         Pages workflow: build, test, generate the synthetic demo graph, guard, deploy
 ```
 
 If a consumer's concept ever appears in `src/`, that is the bug.
+
+---
+
+## Contributing
+
+- New theme → `themes/README.md`.
+- New adapter → `examples/adapters/README.md`.
+- `npm test` has to pass — 99 tests, `node:test`, zero dependencies.
+- The engine itself takes none, ever, and that is not up for negotiation in a PR — an adapter or an
+  example may take its own.
 
 ## Licence
 

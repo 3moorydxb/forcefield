@@ -5,17 +5,20 @@
   "type": "module",
   "license": "MIT",
   "exports": {
-    ".": "./dist/index.js",
-    "./core": "./dist/core/index.js",
-    "./render": "./dist/render/index.js"
+    ".": "./dist/src/index.js",
+    "./core": "./dist/src/core/index.js",
+    "./render": "./dist/src/render/index.js",
+    "./themes": "./dist/themes/index.js"
   },
-  "types": "./dist/index.d.ts",
+  "types": "./dist/src/index.d.ts",
   "files": [
     "dist",
     "README.md",
     "LICENSE"
   ],
-  "sideEffects": false,
+  "sideEffects": [
+    "./dist/themes/index.js"
+  ],
   "engines": {
     "node": ">=20"
   },
@@ -25,6 +28,7 @@
     "test": "npm run build:test && node --test build-test/test/*.test.js",
     "check": "tsc -p tsconfig.json --noEmit",
     "serve": "python3 -m http.server 8902",
+    "demo:data": "node examples/adapters/synthetic-vault.mjs --out .demo-vault --force && node examples/adapters/markdown-tree.mjs --vault .demo-vault --out examples/tree/demo.graph.json",
     "clean": "rm -rf dist build-test",
     "prepare": "npm run build"
   },

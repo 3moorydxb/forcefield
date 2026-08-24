@@ -45,6 +45,9 @@ export type { Renderer, RenderFrame, RenderStats, QuadtreeCells } from './render
 export { darkTheme, lightTheme, TypePalette } from './render/theme.js';
 export type { Theme, NodeStyle, LinkStyle, NodeShape } from './render/theme.js';
 
+export { midnightGlow, themes, themeByName, validateTheme, assertTheme, ThemeError, contrast } from '../themes/index.js';
+export type { ThemeProblem } from '../themes/index.js';
+
 export { InteractionController } from './interaction/controller.js';
 export type { ControllerOptions, ControllerEvent } from './interaction/controller.js';
 

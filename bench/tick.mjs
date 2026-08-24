@@ -14,9 +14,9 @@
  *   node bench/tick.mjs [--sizes 500,1651,2864,6000,12000] [--ticks 60]
  */
 
-import { Graph } from '../dist/core/graph.js';
-import { Simulation } from '../dist/core/simulation.js';
-import { Rng } from '../dist/util/rng.js';
+import { Graph } from '../dist/src/core/graph.js';
+import { Simulation } from '../dist/src/core/simulation.js';
+import { Rng } from '../dist/src/util/rng.js';
 
 const args = Object.fromEntries(
   process.argv

@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- an empty data: URI, so a demo page does not log a 404 for a favicon nobody shipped -->
+<link rel="icon" href="data:,">
 <title>forcefield — live insertion</title>
 <style id="base"></style>
 </head>
@@ -10,8 +12,8 @@
 <div id="app"></div>
 
 <script type="module">
-import { GraphView, Filters, darkTheme, Rng } from '../../dist/index.js';
-import { BASE_CSS, el, makeHud, makeLegend, control, slider, button, checkbox } from '../shared/ui.mjs';
+import { GraphView, Filters, darkTheme, themes, Rng } from '../../dist/src/index.js';
+import { BASE_CSS, el, makeHud, makeLegend, control, slider, button, checkbox, themeSelect } from '../shared/ui.mjs';
 
 document.getElementById('base').textContent = BASE_CSS;
 const app = document.getElementById('app');
@@ -135,6 +137,7 @@ actions.appendChild(button('focus selected', () => {
   const sel = view.graph.selectedIds();
   view.highlight(sel.length ? Filters.expand(Filters.predicate((x) => sel.includes(x.id)), 1) : null);
 }));
+actions.appendChild(themeSelect(view, themes, () => legend.rebuild()));
 panel.appendChild(actions);
 
 panel.appendChild(el('p', { class: 'hint' },

@@ -2,11 +2,16 @@
 dist/
 build-test/
 node_modules/
+_site/
 
 # fixtures generated from a private source (see examples/adapters/README.md).
 # The adapter is committed; the data it produces never is.
 *.graph.json
 fixtures/
+
+# the synthetic markdown vault `npm run demo:data` writes before converting it.
+# Generated, reproducible from a seed, and large — regenerate it, don't track it.
+.demo-vault/
 
 # OS
 .DS_Store
