@@ -24,27 +24,48 @@ npm run serve      # http://localhost:8902/examples/basic/
 
 ---
 
+## Use it in your own software
+
+**forcefield is a library, not an app.** It draws into a `<canvas>` you own, inside your product —
+desktop, web, dashboard, whatever you are building. You supply the data and the look; the engine
+supplies the physics and the interaction.
+
+- **Your data, through an adapter.** The engine never interprets your nodes. `NodeSpec.type` is
+  documented *"your own category string, never interpreted here"*, and `data` is your payload,
+  carried untouched. A folder of markdown notes, a codebase's import graph, an investigation that
+  grows while it runs — same engine, different adapter. See [Adapters](#adapters--pluggable-into-anything).
+- **Your look, through a theme.** Themes are plain data. Ship yours, or contribute one back.
+  See [Themes](#themes).
+- **Your renderer, if you outgrow the default.** Canvas2D ships; `Renderer` is an interface, so a
+  WebGL or SVG backend slots in without touching the simulation.
+
+It already runs inside two unrelated applications on the same engine. That is the reason nothing
+product-specific is allowed into the core — the moment it learns what a "note" is, it stops working
+for the other one.
+
+---
+
 ## Install
 
-Not on npm yet. Until it is, the honest way to depend on it is a git install:
+```bash
+npm i @amoorydxb/forcefield
+```
+
+Or straight from git, if you would rather not go through npm:
 
 ```bash
 npm i github:3moorydxb/forcefield
 ```
 
-That runs `prepare` (`npm run build`) as part of the install — the one devDependency,
-`typescript`, compiles `dist/` right there, so a git install ends up with exactly the `dist/` a
-published package would ship. Newer npm versions print an `allow-scripts`-style warning when a git
+The git install runs `prepare` (`npm run build`) as part of installing — the one devDependency,
+`typescript`, compiles `dist/` right there, so a git install ends up with exactly the `dist/` the
+published package ships. Newer npm versions print an `allow-scripts`-style warning when a git
 dependency runs a lifecycle script on install; that script is `prepare`, and it is what produces
 `dist/` — let it run. **Committing `dist/` to make the warning go away is not the fix.** This
 repo's own Pages workflow exists because `dist/` being gitignored once meant a build step got
 skipped and the demo shipped blank — the fix there was "always build first", never "check in the
 output". Same principle here: build on install, don't let a compiled copy drift out of sync with
 the source that produced it.
-
-```bash
-npm i @amoorydxb/forcefield
-```
 
 ---
 
