@@ -1,6 +1,8 @@
 import type { Renderer, RenderFrame, RenderStats } from './renderer.js';
 import { FLAG_HIDDEN, FLAG_PINNED, FLAG_SELECTED } from '../core/graph.js';
 import { animationPhase, type AnimationSpec } from '../core/direction.js';
+import type { Graph } from '../core/graph.js';
+import type { NodeShape } from './theme.js';
 
 export interface Canvas2DOptions {
   /**
@@ -31,6 +33,54 @@ export interface Canvas2DOptions {
   selectionPulse?: AnimationSpec;
   /** Draw the debug quadtree overlay. */
   showQuadtree?: boolean;
+
+  /**
+   * Classify a node into a `theme.nodeStyles` bucket. Return `-1` to fall back
+   * to the categorical palette.
+   *
+   * Called once per visible node per frame, so keep it cheap — an index lookup,
+   * not an object allocation. Returning an index rather than a style is what
+   * preserves batching.
+   */
+  styleNode?: (i: number, graph: Graph) => number;
+  /** Same, for links, into `theme.linkStyles`. */
+  styleLink?: (l: number, graph: Graph) => number;
+
+  /**
+   * Draw extra per-node channels after the nodes are filled.
+   *
+   * The escape hatch that keeps consumer meaning OUT of the engine: a status
+   * glyph, a promotion tick, a pulsing ring for something the user declared
+   * rather than discovered. The engine hands over a context already in screen
+   * space and never asks what any of it means.
+   *
+   * Runs only for visible, non-culled nodes. Leave the context as you found it.
+   */
+  decorate?: (ctx: CanvasRenderingContext2D, i: number, frame: DecorationInfo) => void;
+
+  /**
+   * Marching-ants animation for any link style with `animateDash`.
+   *
+   * Direction is a FIELD here, never the sign of the dash offset — the whole
+   * reason `core/direction.ts` exists. `'reverse'` makes the ants crawl the
+   * other way at the same speed.
+   */
+  dashAnimation?: AnimationSpec;
+}
+
+/** What `decorate` is handed for one node. Screen-space, ready to draw. */
+export interface DecorationInfo {
+  graph: Graph;
+  /** Node centre, screen pixels. */
+  x: number;
+  y: number;
+  /** On-screen radius, already floored to `minNodePx`. */
+  r: number;
+  /** `true` when the node is recessive in dim mode. */
+  dimmed: boolean;
+  selected: boolean;
+  hovered: boolean;
+  timeMs: number;
 }
 
 /**
@@ -69,6 +119,12 @@ export class Canvas2DRenderer implements Renderer {
   private readonly minNodePx: number;
   private readonly font: string;
   private readonly pulse: AnimationSpec;
+  private readonly dashAnim: AnimationSpec;
+  private readonly styleNode: ((i: number, g: Graph) => number) | undefined;
+  private readonly styleLink: ((l: number, g: Graph) => number) | undefined;
+  private readonly decorate:
+    | ((ctx: CanvasRenderingContext2D, i: number, frame: DecorationInfo) => void)
+    | undefined;
   showQuadtree: boolean;
 
   // Reused per frame so the frame loop allocates nothing.
@@ -94,6 +150,65 @@ export class Canvas2DRenderer implements Renderer {
     // clamped to zero by CSS and rejected outright here, and a clamped animation
     // looks exactly like one that was never written.
     this.pulse = opts.selectionPulse ?? { durationMs: 2400, direction: 'forward' };
+    this.dashAnim = opts.dashAnimation ?? { durationMs: 550, direction: 'forward' };
+    this.styleNode = opts.styleNode;
+    this.styleLink = opts.styleLink;
+    this.decorate = opts.decorate;
+  }
+
+  /**
+   * Trace one node shape into the CURRENT path. Never begins or fills a path —
+   * the caller batches many of these between one `beginPath` and one `fill`.
+   */
+  private tracePath(
+    ctx: CanvasRenderingContext2D,
+    shape: NodeShape,
+    x: number,
+    y: number,
+    r: number,
+  ): void {
+    switch (shape) {
+      case 'square':
+        ctx.rect(x - r * 0.86, y - r * 0.86, r * 1.72, r * 1.72);
+        return;
+      case 'diamond':
+        ctx.moveTo(x, y - r);
+        ctx.lineTo(x + r, y);
+        ctx.lineTo(x, y + r);
+        ctx.lineTo(x - r, y);
+        ctx.closePath();
+        return;
+      case 'triangle':
+        ctx.moveTo(x, y - r);
+        ctx.lineTo(x + r * 0.87, y + r * 0.5);
+        ctx.lineTo(x - r * 0.87, y + r * 0.5);
+        ctx.closePath();
+        return;
+      case 'hexagon': {
+        // Pointy-top: the first vertex sits straight up.
+        for (let k = 0; k < 6; k++) {
+          const a = (Math.PI / 3) * k - Math.PI / 2;
+          const px = x + Math.cos(a) * r;
+          const py = y + Math.sin(a) * r;
+          if (k === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        return;
+      }
+      case 'square-in-square':
+        // Two clockwise rects. Under the default nonzero fill rule the inner
+        // square fills solid; `evenodd` would knock it out into a ring, which is
+        // a different symbol. Do not change the fill rule.
+        ctx.rect(x - r * 0.9, y - r * 0.9, r * 1.8, r * 1.8);
+        ctx.rect(x - r * 0.42, y - r * 0.42, r * 0.84, r * 0.84);
+        return;
+      case 'circle':
+      default:
+        // moveTo before arc, or consecutive arcs are joined by a chord.
+        ctx.moveTo(x + r, y);
+        ctx.arc(x, y, r, 0, TAU);
+    }
   }
 
   /** The one place a node's on-screen size is decided. Rings measure out from it. */
@@ -169,19 +284,42 @@ export class Canvas2DRenderer implements Renderer {
         continue;
       }
 
-      // Weight → stroke width, quantised so links still batch.
-      const q = Math.min(wb - 1, Math.max(0, Math.floor(g.linkWeight[l]! * wb - 1e-9)));
+      // Bucket so links still batch: an explicit style class when the consumer
+      // supplies one, otherwise weight quantised into `weightBuckets` steps.
+      const cls = this.styleLink ? this.styleLink(l, g) : -1;
+      const q =
+        cls >= 0
+          ? cls
+          : Math.min(wb - 1, Math.max(0, Math.floor(g.linkWeight[l]! * wb - 1e-9)));
       const dimmed = dim ? (dim[s] === 0 || dim[t] === 0 ? 1 : 0) : 0;
+      ensureBuckets(this.linkBuckets, (q + 1) * 2);
       this.linkBuckets[q * 2 + dimmed]!.push(l);
     }
 
-    for (let q = 0; q < wb; q++) {
+    const linkStyles = theme.linkStyles;
+    // One shared dash offset for every animated style this frame. Direction is a
+    // field on the spec, not the sign of this number.
+    const dashPhase = animationPhase(this.dashAnim, frame.timeMs);
+
+    const linkBucketCount = Math.floor(this.linkBuckets.length / 2);
+    for (let q = 0; q < linkBucketCount; q++) {
+      const style = this.styleLink && linkStyles ? linkStyles[q] : undefined;
       for (let d = 0; d < 2; d++) {
         const bucket = this.linkBuckets[q * 2 + d]!;
         if (bucket.length === 0) continue;
-        ctx.globalAlpha = d === 1 ? theme.dimOpacity : 1;
-        ctx.strokeStyle = theme.link.color;
-        ctx.lineWidth = Math.max(0.4, ((q + 1) / wb) * 1.4);
+        const baseAlpha = style?.alpha ?? 1;
+        ctx.globalAlpha = d === 1 ? baseAlpha * theme.dimOpacity : baseAlpha;
+        ctx.strokeStyle = style?.color ?? theme.link.color;
+        ctx.lineWidth = style?.width ?? Math.max(0.4, ((q + 1) / wb) * 1.4);
+        if (style?.dash) {
+          ctx.setLineDash(style.dash);
+          if (style.animateDash) {
+            const period = style.dash.reduce((a, b) => a + b, 0);
+            ctx.lineDashOffset = dashPhase * period;
+          }
+        } else {
+          ctx.setLineDash([]);
+        }
         ctx.beginPath();
         for (const l of bucket) {
           const s = g.linkSource[l]!;
@@ -192,6 +330,8 @@ export class Canvas2DRenderer implements Renderer {
         ctx.stroke();
       }
     }
+    ctx.setLineDash([]);
+    ctx.lineDashOffset = 0;
 
     if (this.activeLinks.length > 0) {
       ctx.globalAlpha = 1;
@@ -219,33 +359,84 @@ export class Canvas2DRenderer implements Renderer {
       const wy = g.y[i]!;
       if (wx < vb.minX || wx > vb.maxX || wy < vb.minY || wy > vb.maxY) continue;
 
-      const slot = palette.slotOf(g.types[i]!, theme.palette.length);
-      const bucket = slot < 0 ? theme.palette.length : slot;
+      const cls = this.styleNode ? this.styleNode(i, g) : -1;
+      let bucket: number;
+      if (cls >= 0) {
+        bucket = cls;
+        ensureBuckets(this.nodeBuckets, (bucket + 1) * 2);
+      } else {
+        const slot = palette.slotOf(g.types[i]!, theme.palette.length);
+        bucket = slot < 0 ? theme.palette.length : slot;
+      }
       const dimmed = dim && dim[i] === 0 ? 1 : 0;
       this.nodeBuckets[bucket * 2 + dimmed]!.push(i);
       if (dimmed === 0) this.labelCandidates.push(i);
       stats.nodesDrawn++;
     }
 
-    for (let s = 0; s < slots; s++) {
+    const nodeStyles = theme.nodeStyles;
+    const nodeBucketCount = Math.max(slots, Math.floor(this.nodeBuckets.length / 2));
+    for (let s = 0; s < nodeBucketCount; s++) {
+      const style = this.styleNode && nodeStyles ? nodeStyles[s] : undefined;
+      const shape: NodeShape = style?.shape ?? 'circle';
       for (let d = 0; d < 2; d++) {
         const bucket = this.nodeBuckets[s * 2 + d]!;
-        if (bucket.length === 0) continue;
+        if (!bucket || bucket.length === 0) continue;
         ctx.globalAlpha = d === 1 ? theme.dimOpacity : 1;
-        ctx.fillStyle = s === theme.palette.length ? theme.other : theme.palette[s]!;
+        ctx.fillStyle =
+          style?.fill ?? (s === theme.palette.length ? theme.other : theme.palette[s] ?? theme.other);
+
         ctx.beginPath();
         for (const i of bucket) {
           const px = camera.toScreenX(g.x[i]!);
           const py = camera.toScreenY(g.y[i]!);
           const r = this.screenRadius(g.radius[i]!, k);
-          // moveTo before arc, or the arcs are joined by a chord into one blob.
-          ctx.moveTo(px + r, py);
-          ctx.arc(px, py, r, 0, TAU);
+          this.tracePath(ctx, shape, px, py, r);
         }
         ctx.fill();
+
+        // One stroke pass over the same batch, if this style has an outline.
+        if (style?.stroke) {
+          ctx.strokeStyle = style.stroke;
+          ctx.lineWidth = style.strokeWidth ?? 1.4;
+          ctx.setLineDash(style.dash ?? []);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
       }
     }
     ctx.globalAlpha = 1;
+
+    // Consumer-drawn extra channels, once the fills are down.
+    if (this.decorate) {
+      const info: DecorationInfo = {
+        graph: g,
+        x: 0,
+        y: 0,
+        r: 0,
+        dimmed: false,
+        selected: false,
+        hovered: false,
+        timeMs: frame.timeMs,
+      };
+      for (let s = 0; s < nodeBucketCount; s++) {
+        for (let d = 0; d < 2; d++) {
+          const bucket = this.nodeBuckets[s * 2 + d]!;
+          if (!bucket) continue;
+          for (const i of bucket) {
+            info.x = camera.toScreenX(g.x[i]!);
+            info.y = camera.toScreenY(g.y[i]!);
+            info.r = this.screenRadius(g.radius[i]!, k);
+            info.dimmed = d === 1;
+            info.selected = (g.flags[i]! & FLAG_SELECTED) !== 0;
+            info.hovered = i === hoverIdx;
+            this.decorate(ctx, i, info);
+          }
+        }
+      }
+      ctx.globalAlpha = 1;
+      ctx.setLineDash([]);
+    }
 
     // ------------------------------------------------------------- overlays
     // Pins, in one path.

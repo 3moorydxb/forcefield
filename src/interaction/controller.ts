@@ -355,10 +355,11 @@ export class InteractionController {
     g.flags[i]! |= FLAG_DRAGGING;
     g.vx[i] = 0;
     g.vy[i] = 0;
-    // Raise the FLOOR, not just the current value: alphaTarget keeps the
+    // Raise the FLOOR, not just the current value: a held temperature keeps the
     // simulation warm for the whole gesture instead of cooling under the cursor.
-    this.sim.alphaTarget = this.opts.dragAlpha;
-    this.sim.reheat(this.opts.dragAlpha);
+    // Refcounted via hold()/release() rather than assigning alphaTarget, because
+    // a settings slider may be holding it too — see Simulation.hold().
+    this.sim.hold(this.opts.dragAlpha);
     this.emit('dragstart', id);
   }
 
@@ -367,7 +368,7 @@ export class InteractionController {
     const g = this.sim.graph;
     const i = g.indexOf(this.dragId);
     if (i >= 0) g.flags[i]! &= ~FLAG_DRAGGING;
-    this.sim.alphaTarget = 0;
+    this.sim.release();
     const id = this.dragId;
     this.dragId = null;
     if (emit) this.emit('dragend', id);

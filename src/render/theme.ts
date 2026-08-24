@@ -1,6 +1,56 @@
 import type { Graph } from '../core/graph.js';
 
 /**
+ * Node geometry. Pure shape names — the engine has no idea why a consumer wants
+ * a diamond, and must not.
+ *
+ * `square-in-square` draws two concentric rects in ONE subpath set. Canvas
+ * `rect()` always winds clockwise, so under the default nonzero fill rule the
+ * inner square is filled, not knocked out. Switching the fill rule to `evenodd`
+ * silently turns it into a ring — which is a different symbol, so don't.
+ */
+export type NodeShape =
+  | 'circle'
+  | 'square'
+  | 'diamond'
+  | 'triangle'
+  | 'hexagon'
+  | 'square-in-square';
+
+/**
+ * One bucket of node appearance.
+ *
+ * Styles are addressed by INDEX, not looked up per node, so the renderer can
+ * still batch: every node sharing a style index goes into one path and is filled
+ * once. A consumer that returned a fresh style object per node would turn twenty
+ * driver state changes back into several thousand.
+ */
+export interface NodeStyle {
+  fill: string;
+  stroke?: string;
+  strokeWidth?: number;
+  /** Dash pattern for the stroke, in screen pixels. */
+  dash?: number[];
+  shape?: NodeShape;
+  labelColor?: string;
+}
+
+/** One bucket of link appearance. Same batching contract as `NodeStyle`. */
+export interface LinkStyle {
+  color: string;
+  width?: number;
+  alpha?: number;
+  dash?: number[];
+  /**
+   * Animate this style's dash offset ("marching ants").
+   *
+   * Direction is an explicit field on the animation spec, never the sign of the
+   * offset — see `core/direction.ts` for the incident that rule comes from.
+   */
+  animateDash?: boolean;
+}
+
+/**
  * Theming.
  *
  * The engine ships a **brand-neutral placeholder palette and nothing else.** It
@@ -43,6 +93,15 @@ export interface Theme {
   labelHalo: string;
   /** Opacity applied to anything outside the highlight set in dim mode. */
   dimOpacity: number;
+
+  /**
+   * Optional explicit style buckets, used instead of `palette` when the
+   * renderer is given a `styleNode` / `styleLink` classifier. This is the seam a
+   * consumer with real semantics (shapes, a confidence ladder, a quarantine
+   * state) uses — it supplies the meaning, the engine supplies the batching.
+   */
+  nodeStyles?: NodeStyle[];
+  linkStyles?: LinkStyle[];
 }
 
 export const darkTheme: Theme = {

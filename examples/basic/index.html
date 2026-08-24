@@ -12,6 +12,7 @@
 <script type="module">
 import { GraphView, Filters, darkTheme, lightTheme, Rng } from '../../dist/index.js';
 import { BASE_CSS, el, makeHud, makeLegend, control, slider, button, checkbox } from '../shared/ui.mjs';
+import { makePhysicsPanel } from '../shared/physics-panel.mjs';
 
 document.getElementById('base').textContent = BASE_CSS;
 const app = document.getElementById('app');
@@ -101,23 +102,18 @@ panel.appendChild(filterSection);
 
 const forceSection = el('section');
 forceSection.appendChild(el('h2', {}, 'forces'));
-forceSection.appendChild(control('repulsion', slider({
-  min: 0, max: 4, step: 0.1, value: 1,
-  onInput: (v) => { view.simulation.force('manyBody').scale = v; view.simulation.reheat(0.3); },
-})));
-forceSection.appendChild(control('link length', slider({
-  min: 10, max: 160, step: 2, value: 44,
-  onInput: (v) => { view.simulation.force('link').distance = v; view.simulation.reheat(0.3); },
-})));
+const physics = makePhysicsPanel(view, { storageKey: 'graph-engine:physics:basic' });
+forceSection.appendChild(physics.box);
+forceSection.appendChild(el('div', { style: { height: '8px' } }));
 forceSection.appendChild(control('theta', slider({
   min: 0, max: 1.5, step: 0.05, value: 0.9,
-  onInput: (v) => { view.simulation.force('manyBody').theta = v; },
+  onInput: (v) => { view.simulation.force('manyBody').theta = v; view.invalidate(); },
 })));
 forceSection.appendChild(checkbox('collision', true, (on) => {
   view.simulation.force('collide').enabled = on; view.simulation.reheat(0.3);
 }));
 forceSection.appendChild(checkbox('show quadtree', false, (on) => {
-  view.renderer.showQuadtree = on;
+  view.renderer.showQuadtree = on; view.invalidate();
 }));
 panel.appendChild(forceSection);
 

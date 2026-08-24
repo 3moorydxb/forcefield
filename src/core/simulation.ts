@@ -2,6 +2,11 @@ import { Graph, FLAG_DRAGGING, FLAG_HIDDEN, FLAG_PINNED } from './graph.js';
 import { Quadtree } from './quadtree.js';
 import { Rng } from '../util/rng.js';
 import type { Force, ForceContext } from './forces/types.js';
+import {
+  DEFAULT_PHYSICS,
+  normalisePhysics,
+  type PhysicsSettings,
+} from './physics.js';
 import { ManyBodyForce } from './forces/manyBody.js';
 import { LinkForce } from './forces/link.js';
 import { CenterForce, GravityForce } from './forces/center.js';
@@ -72,6 +77,8 @@ export class Simulation {
   private capacity: number;
   private listeners: Record<string, Listener[]> = {};
   private knownVersion = -1;
+  private holds = 0;
+  private settings: PhysicsSettings = { ...DEFAULT_PHYSICS };
 
   constructor(graph: Graph, config: SimulationConfig = {}) {
     this.graph = graph;
@@ -113,6 +120,93 @@ export class Simulation {
 
   get settled(): boolean {
     return this.alpha < this.alphaMin;
+  }
+
+  // ------------------------------------------------------- live physics
+
+  /** The current settings. A copy — mutating it does nothing. */
+  getForces(): PhysicsSettings {
+    return { ...this.settings };
+  }
+
+  /**
+   * Change physics on a RUNNING simulation.
+   *
+   * Nothing is rebuilt, nothing is re-laid-out, and no node position is touched:
+   * the force objects read their fields fresh on every tick, so the next tick
+   * already uses the new values. The graph reflows from where it is.
+   *
+   * The `reheat` is not optional garnish — it is the whole feature. Every force
+   * multiplies by `alpha`, so on a settled graph (`alpha < alphaMin`) `tick()`
+   * early-returns and a pure setter would change the numbers and change nothing
+   * on screen, forever, while the user goes on dragging the slider. Pass
+   * `reheat: 0` only if you are holding the temperature up yourself.
+   *
+   * ⚠️ It deliberately does NOT touch `graph.version`. That is the tempting
+   * one-liner for "make it redraw", and it would invalidate the adjacency cache
+   * and re-run every force's `initialize()` — an O(n + links) sweep — on every
+   * `input` event, i.e. around sixty times a second while a slider moves.
+   */
+  setForces(patch: Partial<PhysicsSettings>, opts: { reheat?: number } = {}): this {
+    const clean = normalisePhysics(patch);
+    Object.assign(this.settings, clean);
+    this.applySettings();
+    const reheat = opts.reheat ?? 0.3;
+    if (reheat > 0) this.reheat(reheat);
+    return this;
+  }
+
+  /** Push the current settings down onto the force objects. */
+  private applySettings(): void {
+    const s = this.settings;
+
+    // Centring drives BOTH forces. CenterForce is a translation that stands
+    // down whenever anything is pinned or dragged, so on its own this control
+    // would silently do nothing for a user who has pinned a single node.
+    // GravityForce has no such guard and carries the setting in that case.
+    const centre = this.force('center');
+    if (centre) (centre as unknown as { strength: number }).strength = s.centerForce * 0.5;
+    const gravity = this.force('gravity');
+    if (gravity) (gravity as unknown as { strength: number }).strength = s.centerForce * 0.3;
+
+    const many = this.force('manyBody');
+    if (many) (many as unknown as { scale: number }).scale = s.repelForce;
+
+    const link = this.force('link');
+    if (link) {
+      const l = link as unknown as { strength: number; distance: number };
+      l.strength = s.linkForce;
+      l.distance = s.linkDistance;
+    }
+  }
+
+  /**
+   * Hold the simulation at a working temperature until `release()`.
+   *
+   * Refcounted, and that matters: a node drag and a settings slider both want
+   * the graph warm, and both used to write `alphaTarget` directly. Releasing
+   * either one then zeroed the target while the other was still in progress —
+   * so letting go of a node mid-slider-drag froze the graph under a slider the
+   * user was still moving. Counting holds makes the two independent.
+   *
+   * `hold()`/`release()` must be balanced. `release()` never drops below zero.
+   */
+  hold(target = 0.3): this {
+    this.holds++;
+    if (target > this.alphaTarget) this.alphaTarget = target;
+    this.reheat(target);
+    return this;
+  }
+
+  release(): this {
+    if (this.holds > 0) this.holds--;
+    if (this.holds === 0) this.alphaTarget = 0;
+    return this;
+  }
+
+  /** How many holds are outstanding. Exposed for tests and for debugging a stuck graph. */
+  get holdCount(): number {
+    return this.holds;
   }
 
   /** Full restart — only for a genuinely new graph. Filtering must NOT call this. */

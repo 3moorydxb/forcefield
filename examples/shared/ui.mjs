@@ -158,4 +158,11 @@ export const BASE_CSS = `
   kbd { background: #2c2c2a; border: 1px solid #45453f; border-bottom-width: 2px;
     border-radius: 4px; padding: 0 4px; font: 11px ui-monospace, monospace; color: #c3c2b7; }
   .status { margin-top: 6px; color: #fff; font-variant-numeric: tabular-nums; }
+  .physics-row { margin-bottom: 9px; }
+  .physics-label { display: block; color: #898781; margin-bottom: 3px; }
+  .physics-control { display: flex; align-items: center; gap: 8px; }
+  .physics-control input[type=range] { flex: 1; min-width: 0; accent-color: #3987e5; }
+  .physics-value { color: #fff; font-variant-numeric: tabular-nums;
+    min-width: 40px; text-align: right; font-size: 12px; }
+  .physics-reset { width: 100%; margin-top: 4px; }
 `;

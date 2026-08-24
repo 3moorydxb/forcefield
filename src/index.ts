@@ -16,6 +16,16 @@ export type { SimulationConfig } from './core/simulation.js';
 
 export { Quadtree } from './core/quadtree.js';
 
+export {
+  DEFAULT_PHYSICS,
+  PHYSICS_LIMITS,
+  normalisePhysics,
+  expoResponse,
+  expoPosition,
+  PhysicsError,
+} from './core/physics.js';
+export type { PhysicsSettings } from './core/physics.js';
+
 export { applyFilter, Filters } from './core/filter.js';
 export type { Filter, FilterStats, Mask } from './core/filter.js';
 
@@ -30,10 +40,10 @@ export type { Force, ForceContext, ForcePhase } from './core/forces/types.js';
 
 export { Camera } from './render/camera.js';
 export { Canvas2DRenderer } from './render/canvas2d.js';
-export type { Canvas2DOptions } from './render/canvas2d.js';
+export type { Canvas2DOptions, DecorationInfo } from './render/canvas2d.js';
 export type { Renderer, RenderFrame, RenderStats, QuadtreeCells } from './render/renderer.js';
 export { darkTheme, lightTheme, TypePalette } from './render/theme.js';
-export type { Theme } from './render/theme.js';
+export type { Theme, NodeStyle, LinkStyle, NodeShape } from './render/theme.js';
 
 export { InteractionController } from './interaction/controller.js';
 export type { ControllerOptions, ControllerEvent } from './interaction/controller.js';
