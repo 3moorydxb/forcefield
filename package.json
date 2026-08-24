@@ -1,6 +1,6 @@
 {
   "name": "@amoorydxb/forcefield",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A dependency-free force-directed graph engine: Barnes-Hut many-body simulation, velocity-Verlet integration, drag/pin/filter/zoom, behind a swappable renderer interface.",
   "type": "module",
   "license": "MIT",
