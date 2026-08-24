@@ -43,7 +43,7 @@ output". Same principle here: build on install, don't let a compiled copy drift 
 the source that produced it.
 
 ```bash
-npm i forcefield   # once published
+npm i @amoorydxb/forcefield
 ```
 
 ---
@@ -71,7 +71,7 @@ hierarchy this was tested against, the stored coordinates only covered 55% of th
 ## Quick start
 
 ```ts
-import { GraphView, Filters, themeByName } from 'forcefield';
+import { GraphView, Filters, themeByName } from '@amoorydxb/forcefield';
 
 const view = new GraphView({ container: document.getElementById('app')! });
 
