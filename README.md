@@ -39,9 +39,11 @@ supplies the physics and the interaction.
 - **Your renderer, if you outgrow the default.** Canvas2D ships; `Renderer` is an interface, so a
   WebGL or SVG backend slots in without touching the simulation.
 
-It already runs inside two unrelated applications on the same engine. That is the reason nothing
-product-specific is allowed into the core — the moment it learns what a "note" is, it stops working
-for the other one.
+It already runs inside two unrelated applications on the same engine: a second brain over a
+markdown vault, and an OSINT tool whose graph grows while an investigation runs. Those two want
+opposite things — a saved hierarchy of thousands of nodes versus a handful that appear one at a
+time — which is exactly why nothing product-specific is allowed into the core. The moment the
+engine learns what a "note" is, it stops working for the other one.
 
 ---
 
