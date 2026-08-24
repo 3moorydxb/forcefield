@@ -1,0 +1,388 @@
+import type { Renderer, RenderFrame, RenderStats } from './renderer.js';
+import { FLAG_HIDDEN, FLAG_PINNED, FLAG_SELECTED } from '../core/graph.js';
+import { animationPhase, type AnimationSpec } from '../core/direction.js';
+
+export interface Canvas2DOptions {
+  /**
+   * Zoom above which labels appear at all. Below it, labels are illegible and
+   * cost more than the graph itself.
+   */
+  labelZoom?: number;
+  /**
+   * Hard cap on labels per frame. Text is by far the most expensive thing a
+   * canvas draws: 2,800 labels is roughly 2,800 shaping passes. Nodes are
+   * chosen by degree, so the cap keeps the ones that carry the structure.
+   */
+  maxLabels?: number;
+  /** Number of distinct stroke widths used for link weight. More = less batching. */
+  weightBuckets?: number;
+  /**
+   * Smallest a node may be drawn, in screen pixels.
+   *
+   * Every ring (pin, hover, selection) is measured OUT FROM this same number, so
+   * a node and its decoration stay in proportion at any zoom. Sizing the fill in
+   * world units while flooring the rings in screen pixels makes a zoomed-out
+   * graph render as hollow circles — the ring keeps its size while the disc
+   * inside it shrinks to nothing.
+   */
+  minNodePx?: number;
+  font?: string;
+  /** Pulse on the selection ring. Direction is a field, never a negative duration. */
+  selectionPulse?: AnimationSpec;
+  /** Draw the debug quadtree overlay. */
+  showQuadtree?: boolean;
+}
+
+/**
+ * Canvas 2D renderer.
+ *
+ * The whole performance story here is **batching**. A canvas call like
+ * `strokeStyle = …` forces the driver to flush; done per edge, 6,000 edges cost
+ * 6,000 state changes and the frame is gone before any physics runs. So every
+ * edge that shares a style goes into ONE path and is stroked once, and every
+ * node that shares a fill goes into one path and is filled once. That turns
+ * thousands of state changes into about twenty.
+ *
+ * The other half is refusing to draw what cannot be seen: off-screen nodes are
+ * culled against the camera's world bounds, and labels are capped and gated on
+ * zoom.
+ *
+ * It is Canvas 2D and not WebGL because at the scale this was built for
+ * (single-digit thousands of nodes) Canvas holds 60fps with room to spare, and
+ * it has no shader compilation, no context-loss handling, and no dependency.
+ * When a consumer needs 100k nodes, `Renderer` is the seam to replace — nothing
+ * else has to change.
+ */
+export class Canvas2DRenderer implements Renderer {
+  readonly kind = 'canvas2d';
+  readonly stats: RenderStats = { nodesDrawn: 0, linksDrawn: 0, labelsDrawn: 0 };
+
+  private canvas: HTMLCanvasElement;
+  private ctx: CanvasRenderingContext2D;
+  private dpr = 1;
+  private cssWidth = 1;
+  private cssHeight = 1;
+
+  private readonly labelZoom: number;
+  private readonly maxLabels: number;
+  private readonly weightBuckets: number;
+  private readonly minNodePx: number;
+  private readonly font: string;
+  private readonly pulse: AnimationSpec;
+  showQuadtree: boolean;
+
+  // Reused per frame so the frame loop allocates nothing.
+  private nodeBuckets: number[][] = [];
+  private linkBuckets: number[][] = [];
+  private activeLinks: number[] = [];
+  private labelCandidates: number[] = [];
+
+  constructor(canvas: HTMLCanvasElement, opts: Canvas2DOptions = {}) {
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) throw new Error('Canvas2DRenderer: could not acquire a 2d context');
+    this.canvas = canvas;
+    this.ctx = ctx;
+    this.labelZoom = opts.labelZoom ?? 0.55;
+    this.maxLabels = opts.maxLabels ?? 180;
+    this.weightBuckets = Math.max(1, opts.weightBuckets ?? 3);
+    this.minNodePx = opts.minNodePx ?? 1.6;
+    this.font = opts.font ?? '11px ui-sans-serif, system-ui, -apple-system, sans-serif';
+    this.showQuadtree = opts.showQuadtree ?? false;
+
+    // The trap this engine refuses to fall into: a reversed animation is
+    // `direction: 'reverse'`, never `durationMs: -2400`. A negative duration is
+    // clamped to zero by CSS and rejected outright here, and a clamped animation
+    // looks exactly like one that was never written.
+    this.pulse = opts.selectionPulse ?? { durationMs: 2400, direction: 'forward' };
+  }
+
+  /** The one place a node's on-screen size is decided. Rings measure out from it. */
+  private screenRadius(worldRadius: number, k: number): number {
+    const r = worldRadius * k;
+    return r < this.minNodePx ? this.minNodePx : r;
+  }
+
+  resize(cssWidth: number, cssHeight: number, dpr: number): void {
+    this.cssWidth = Math.max(1, cssWidth);
+    this.cssHeight = Math.max(1, cssHeight);
+    this.dpr = dpr;
+    this.canvas.width = Math.round(this.cssWidth * dpr);
+    this.canvas.height = Math.round(this.cssHeight * dpr);
+    this.canvas.style.width = `${this.cssWidth}px`;
+    this.canvas.style.height = `${this.cssHeight}px`;
+  }
+
+  render(frame: RenderFrame): void {
+    const { graph: g, camera, theme, palette, dim } = frame;
+    const ctx = this.ctx;
+
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.fillStyle = theme.background;
+    ctx.fillRect(0, 0, this.cssWidth, this.cssHeight);
+
+    const stats = this.stats;
+    stats.nodesDrawn = 0;
+    stats.linksDrawn = 0;
+    stats.labelsDrawn = 0;
+
+    const n = g.nodeCount;
+    if (n === 0) return;
+
+    const k = camera.k;
+    const vb = camera.visibleBounds(64 / k);
+
+    // ---------------------------------------------------------------- links
+    const wb = this.weightBuckets;
+    ensureBuckets(this.linkBuckets, wb * 2);
+    for (const b of this.linkBuckets) b.length = 0;
+    this.activeLinks.length = 0;
+
+    const hoverIdx = frame.hover ? g.indexOf(frame.hover) : -1;
+
+    for (let l = 0; l < g.linkCount; l++) {
+      const s = g.linkSource[l]!;
+      const t = g.linkTarget[l]!;
+      if ((g.flags[s]! | g.flags[t]!) & FLAG_HIDDEN) continue;
+
+      const sx = g.x[s]!;
+      const sy = g.y[s]!;
+      const tx = g.x[t]!;
+      const ty = g.y[t]!;
+      // Cull: the segment's bounding box against the viewport.
+      if (
+        Math.max(sx, tx) < vb.minX ||
+        Math.min(sx, tx) > vb.maxX ||
+        Math.max(sy, ty) < vb.minY ||
+        Math.min(sy, ty) > vb.maxY
+      ) {
+        continue;
+      }
+
+      const touched =
+        s === hoverIdx ||
+        t === hoverIdx ||
+        (g.flags[s]! & FLAG_SELECTED) !== 0 ||
+        (g.flags[t]! & FLAG_SELECTED) !== 0;
+      stats.linksDrawn++;
+      if (touched) {
+        this.activeLinks.push(l);
+        continue;
+      }
+
+      // Weight → stroke width, quantised so links still batch.
+      const q = Math.min(wb - 1, Math.max(0, Math.floor(g.linkWeight[l]! * wb - 1e-9)));
+      const dimmed = dim ? (dim[s] === 0 || dim[t] === 0 ? 1 : 0) : 0;
+      this.linkBuckets[q * 2 + dimmed]!.push(l);
+    }
+
+    for (let q = 0; q < wb; q++) {
+      for (let d = 0; d < 2; d++) {
+        const bucket = this.linkBuckets[q * 2 + d]!;
+        if (bucket.length === 0) continue;
+        ctx.globalAlpha = d === 1 ? theme.dimOpacity : 1;
+        ctx.strokeStyle = theme.link.color;
+        ctx.lineWidth = Math.max(0.4, ((q + 1) / wb) * 1.4);
+        ctx.beginPath();
+        for (const l of bucket) {
+          const s = g.linkSource[l]!;
+          const t = g.linkTarget[l]!;
+          ctx.moveTo(camera.toScreenX(g.x[s]!), camera.toScreenY(g.y[s]!));
+          ctx.lineTo(camera.toScreenX(g.x[t]!), camera.toScreenY(g.y[t]!));
+        }
+        ctx.stroke();
+      }
+    }
+
+    if (this.activeLinks.length > 0) {
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = theme.link.active;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      for (const l of this.activeLinks) {
+        const s = g.linkSource[l]!;
+        const t = g.linkTarget[l]!;
+        ctx.moveTo(camera.toScreenX(g.x[s]!), camera.toScreenY(g.y[s]!));
+        ctx.lineTo(camera.toScreenX(g.x[t]!), camera.toScreenY(g.y[t]!));
+      }
+      ctx.stroke();
+    }
+
+    // ---------------------------------------------------------------- nodes
+    const slots = theme.palette.length + 1; // + "other"
+    ensureBuckets(this.nodeBuckets, slots * 2);
+    for (const b of this.nodeBuckets) b.length = 0;
+    this.labelCandidates.length = 0;
+
+    for (let i = 0; i < n; i++) {
+      if (g.flags[i]! & FLAG_HIDDEN) continue;
+      const wx = g.x[i]!;
+      const wy = g.y[i]!;
+      if (wx < vb.minX || wx > vb.maxX || wy < vb.minY || wy > vb.maxY) continue;
+
+      const slot = palette.slotOf(g.types[i]!, theme.palette.length);
+      const bucket = slot < 0 ? theme.palette.length : slot;
+      const dimmed = dim && dim[i] === 0 ? 1 : 0;
+      this.nodeBuckets[bucket * 2 + dimmed]!.push(i);
+      if (dimmed === 0) this.labelCandidates.push(i);
+      stats.nodesDrawn++;
+    }
+
+    for (let s = 0; s < slots; s++) {
+      for (let d = 0; d < 2; d++) {
+        const bucket = this.nodeBuckets[s * 2 + d]!;
+        if (bucket.length === 0) continue;
+        ctx.globalAlpha = d === 1 ? theme.dimOpacity : 1;
+        ctx.fillStyle = s === theme.palette.length ? theme.other : theme.palette[s]!;
+        ctx.beginPath();
+        for (const i of bucket) {
+          const px = camera.toScreenX(g.x[i]!);
+          const py = camera.toScreenY(g.y[i]!);
+          const r = this.screenRadius(g.radius[i]!, k);
+          // moveTo before arc, or the arcs are joined by a chord into one blob.
+          ctx.moveTo(px + r, py);
+          ctx.arc(px, py, r, 0, TAU);
+        }
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // ------------------------------------------------------------- overlays
+    // Pins, in one path.
+    ctx.strokeStyle = theme.pin;
+    ctx.lineWidth = 1.25;
+    ctx.beginPath();
+    let pins = 0;
+    for (let i = 0; i < n; i++) {
+      const f = g.flags[i]!;
+      if (f & FLAG_HIDDEN || !(f & FLAG_PINNED)) continue;
+      const px = camera.toScreenX(g.x[i]!);
+      const py = camera.toScreenY(g.y[i]!);
+      if (px < -20 || py < -20 || px > this.cssWidth + 20 || py > this.cssHeight + 20) continue;
+      const r = this.screenRadius(g.radius[i]!, k) + 3;
+      ctx.moveTo(px + r, py);
+      ctx.arc(px, py, r, 0, TAU);
+      pins++;
+    }
+    if (pins > 0) ctx.stroke();
+
+    // Selection ring. The pulse is a real animation with a positive duration and
+    // an explicit direction — see `core/direction.ts` for why that is a rule.
+    const phase = animationPhase(this.pulse, frame.timeMs);
+    const breathe = 0.5 - 0.5 * Math.cos(phase * TAU); // 0 → 1 → 0
+    ctx.strokeStyle = theme.selection;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    let sel = 0;
+    for (let i = 0; i < n; i++) {
+      const f = g.flags[i]!;
+      if (f & FLAG_HIDDEN || !(f & FLAG_SELECTED)) continue;
+      const px = camera.toScreenX(g.x[i]!);
+      const py = camera.toScreenY(g.y[i]!);
+      const r = this.screenRadius(g.radius[i]!, k) + 4.5 + breathe * 2.5;
+      ctx.moveTo(px + r, py);
+      ctx.arc(px, py, r, 0, TAU);
+      sel++;
+    }
+    if (sel > 0) ctx.stroke();
+
+    // Hover ring.
+    if (hoverIdx >= 0 && !(g.flags[hoverIdx]! & FLAG_HIDDEN)) {
+      const px = camera.toScreenX(g.x[hoverIdx]!);
+      const py = camera.toScreenY(g.y[hoverIdx]!);
+      const r = this.screenRadius(g.radius[hoverIdx]!, k) + 3;
+      ctx.strokeStyle = theme.hover;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(px, py, r, 0, TAU);
+      ctx.stroke();
+    }
+
+    // ---------------------------------------------------------------- labels
+    // The hovered node ALWAYS gets a label, at any zoom. Three of the eight
+    // light-mode palette slots sit under 3:1 against the surface, so colour
+    // alone is not allowed to be the only thing identifying a node.
+    ctx.font = this.font;
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+
+    if (k >= this.labelZoom) {
+      this.labelCandidates.sort((a, b) => g.degree[b]! - g.degree[a]!);
+      const count = Math.min(this.maxLabels, this.labelCandidates.length);
+      for (let j = 0; j < count; j++) {
+        const i = this.labelCandidates[j]!;
+        if (i === hoverIdx) continue;
+        this.drawLabel(frame, i, theme.label);
+      }
+    }
+    if (hoverIdx >= 0 && !(g.flags[hoverIdx]! & FLAG_HIDDEN)) {
+      this.drawLabel(frame, hoverIdx, theme.ink.primary);
+    }
+
+    // ------------------------------------------------------------- marquee
+    if (frame.marquee) {
+      const m = frame.marquee;
+      const x = Math.min(m.x0, m.x1);
+      const y = Math.min(m.y0, m.y1);
+      const w = Math.abs(m.x1 - m.x0);
+      const h = Math.abs(m.y1 - m.y0);
+      ctx.strokeStyle = theme.ink.secondary;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+      ctx.setLineDash([]);
+    }
+
+    if (this.showQuadtree) this.drawQuadtree(frame);
+  }
+
+  private drawLabel(frame: RenderFrame, i: number, color: string): void {
+    const { graph: g, camera, theme } = frame;
+    const ctx = this.ctx;
+    const px = camera.toScreenX(g.x[i]!);
+    const py = camera.toScreenY(g.y[i]!);
+    if (px < -80 || py < -20 || px > this.cssWidth + 80 || py > this.cssHeight + 20) return;
+    const r = this.screenRadius(g.radius[i]!, camera.k);
+    const text = g.labels[i]!;
+    // Halo first so text stays readable where it crosses an edge.
+    ctx.strokeStyle = theme.labelHalo;
+    ctx.lineWidth = 3;
+    ctx.strokeText(text, px + r + 4, py);
+    ctx.fillStyle = color;
+    ctx.fillText(text, px + r + 4, py);
+    this.stats.labelsDrawn++;
+  }
+
+  /** Debug view of the Barnes-Hut subdivision — how the O(n log n) is earned. */
+  private drawQuadtree(frame: RenderFrame): void {
+    const ctx = this.ctx;
+    const { camera, theme, tree } = frame;
+    if (!tree) return;
+    ctx.strokeStyle = theme.ink.muted;
+    ctx.globalAlpha = 0.25;
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    for (let c = 0; c < tree.count; c++) {
+      if (tree.bodies[c] === 0) continue;
+      const h = tree.half[c]! * camera.k;
+      const px = camera.toScreenX(tree.cx[c]!);
+      const py = camera.toScreenY(tree.cy[c]!);
+      if (h < 2) continue;
+      ctx.rect(px - h, py - h, h * 2, h * 2);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  destroy(): void {
+    // Nothing retained beyond the canvas the consumer owns.
+    this.nodeBuckets = [];
+    this.linkBuckets = [];
+  }
+}
+
+const TAU = Math.PI * 2;
+
+function ensureBuckets(arr: number[][], n: number): void {
+  while (arr.length < n) arr.push([]);
+}

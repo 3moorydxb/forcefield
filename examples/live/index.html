@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>graph-engine — live insertion</title>
+<style id="base"></style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="module">
+import { GraphView, Filters, darkTheme, Rng } from '../../dist/index.js';
+import { BASE_CSS, el, makeHud, makeLegend, control, slider, button, checkbox } from '../shared/ui.mjs';
+
+document.getElementById('base').textContent = BASE_CSS;
+const app = document.getElementById('app');
+
+/**
+ * The live-insertion case.
+ *
+ * There is no pre-computed layout here and there never will be: nodes arrive one
+ * at a time while the simulation is already running, and the graph has to settle
+ * around each one without the existing arrangement jumping. This is the harder of
+ * the two consumers, and building for it is why the hierarchy case comes free.
+ *
+ * The edges carry a **confidence weight** — a weak edge pulls weakly and draws
+ * thinner. Nothing here knows what is being investigated; `type` and `kind` are
+ * opaque strings the page chose, not vocabulary the engine understands.
+ */
+
+const view = new GraphView({
+  container: app,
+  theme: darkTheme,
+  simulation: { seed: 4242 },
+  canvas: { maxLabels: 120, labelZoom: 0.4 },
+});
+window.view = view;
+
+const rng = new Rng(4242);
+const KINDS = ['handle', 'email', 'domain', 'phone', 'address', 'org', 'image', 'breach'];
+let n = 0;
+let running = false;
+let rate = 6;
+
+function addOne() {
+  const type = KINDS[Math.floor(rng.next() * KINDS.length)];
+  const id = `${type}-${n++}`;
+  const existing = view.graph.ids;
+  const links = [];
+  if (existing.length > 0) {
+    // Attach to one or two existing nodes with varying confidence.
+    const edges = rng.next() < 0.25 ? 2 : 1;
+    for (let e = 0; e < edges; e++) {
+      const other = existing[Math.floor(rng.next() * existing.length)];
+      if (other && other !== id) {
+        links.push({ source: other, target: id, weight: 0.15 + rng.next() * 0.85, kind: 'link' });
+      }
+    }
+  }
+  view.insert({ id, label: id, type, radius: 4 + rng.next() * 3 }, links);
+  legend.rebuild();
+  status.textContent = `${view.graph.nodeCount} nodes · ${view.graph.linkCount} links · alpha ${view.simulation.alpha.toFixed(3)}`;
+}
+
+let acc = 0;
+let last = performance.now();
+function pump(t) {
+  const dt = t - last;
+  last = t;
+  if (running) {
+    acc += (dt / 1000) * rate;
+    while (acc >= 1) { addOne(); acc -= 1; }
+  }
+  requestAnimationFrame(pump);
+}
+requestAnimationFrame(pump);
+
+// ------------------------------------------------------------------- panel
+const panel = el('div', { class: 'panel' });
+panel.appendChild(el('h1', {}, 'live insertion'));
+panel.appendChild(el('p', { class: 'sub' }, 'no pre-computed layout · nodes arrive while it runs'));
+const status = el('p', { class: 'status' }, '0 nodes');
+panel.appendChild(status);
+
+const feed = el('section');
+feed.appendChild(el('h2', {}, 'feed'));
+const startBtn = button('start', () => {
+  running = !running;
+  startBtn.textContent = running ? 'pause' : 'start';
+});
+feed.appendChild(startBtn);
+feed.appendChild(button('+1', addOne));
+feed.appendChild(button('+50', () => { for (let i = 0; i < 50; i++) addOne(); }));
+feed.appendChild(el('div', { style: { height: '6px' } }));
+feed.appendChild(control('per second', slider({
+  min: 1, max: 60, step: 1, value: 6, onInput: (v) => { rate = v; },
+})));
+feed.appendChild(button('clear', () => {
+  for (const id of [...view.graph.ids]) view.graph.removeNode(id);
+  n = 0; legend.rebuild(); status.textContent = '0 nodes';
+}));
+panel.appendChild(feed);
+
+const forceSection = el('section');
+forceSection.appendChild(el('h2', {}, 'forces'));
+forceSection.appendChild(control('repulsion', slider({
+  min: 0, max: 4, step: 0.1, value: 1,
+  onInput: (v) => { view.simulation.force('manyBody').scale = v; view.simulation.reheat(0.3); },
+})));
+forceSection.appendChild(control('link length', slider({
+  min: 10, max: 160, step: 2, value: 44,
+  onInput: (v) => { view.simulation.force('link').distance = v; view.simulation.reheat(0.3); },
+})));
+forceSection.appendChild(checkbox('show quadtree', false, (on) => { view.renderer.showQuadtree = on; }));
+panel.appendChild(forceSection);
+
+const legendSection = el('section');
+legendSection.appendChild(el('h2', {}, 'node type'));
+const hiddenTypes = new Set();
+const legend = makeLegend(view, (label, node) => {
+  const off = node.dataset.off === '1';
+  node.dataset.off = off ? '0' : '1';
+  if (off) hiddenTypes.delete(label); else hiddenTypes.add(label);
+  const keep = [...new Set(view.graph.types)].filter((t) => !hiddenTypes.has(t || '(untyped)'));
+  view.filter(hiddenTypes.size ? Filters.ofType(...keep) : null);
+});
+legendSection.appendChild(legend.box);
+panel.appendChild(legendSection);
+
+const actions = el('section');
+actions.appendChild(el('h2', {}, 'actions'));
+actions.appendChild(button('fit', () => view.fit()));
+actions.appendChild(button('focus selected', () => {
+  const sel = view.graph.selectedIds();
+  view.highlight(sel.length ? Filters.expand(Filters.predicate((x) => sel.includes(x.id)), 1) : null);
+}));
+panel.appendChild(actions);
+
+panel.appendChild(el('p', { class: 'hint' },
+  'Edge thickness is confidence. A new node is seeded beside whatever it connects to and the simulation reheats — it does not restart, so the settled part of the graph stays put.'));
+
+app.appendChild(panel);
+app.appendChild(makeHud(view));
+
+for (let i = 0; i < 40; i++) addOne();
+view.fit();
+view.fitWhenSettled();
+view.start();
+</script>
+</body>
+</html>

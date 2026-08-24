@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>graph-engine — synthetic graph</title>
+<style id="base"></style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="module">
+import { GraphView, Filters, darkTheme, lightTheme, Rng } from '../../dist/index.js';
+import { BASE_CSS, el, makeHud, makeLegend, control, slider, button, checkbox } from '../shared/ui.mjs';
+
+document.getElementById('base').textContent = BASE_CSS;
+const app = document.getElementById('app');
+
+/**
+ * A synthetic graph, generated from a seed.
+ *
+ * The point of this example is that ANYONE can reproduce the benchmark: no
+ * private data, no fixture to download. Same seed, same graph, same numbers.
+ */
+function synth(nodeCount, seed = 1) {
+  const rng = new Rng(seed);
+  const kinds = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta'];
+  const nodes = [];
+  const links = [];
+  const clusters = Math.max(1, Math.round(Math.sqrt(nodeCount) / 2));
+  for (let i = 0; i < nodeCount; i++) {
+    const c = Math.floor(rng.next() * clusters);
+    nodes.push({
+      id: `n${i}`,
+      label: `node ${i}`,
+      type: kinds[c % kinds.length],
+      radius: 3 + rng.next() * 4,
+      data: { cluster: c },
+    });
+  }
+  // A spanning tree so nothing is orphaned, then extra intra-cluster edges.
+  for (let i = 1; i < nodeCount; i++) {
+    links.push({ source: `n${Math.floor(rng.next() * i)}`, target: `n${i}`, weight: 1 });
+  }
+  for (let i = 0; i < nodeCount * 0.4; i++) {
+    const a = Math.floor(rng.next() * nodeCount);
+    const b = Math.floor(rng.next() * nodeCount);
+    if (a !== b) links.push({ source: `n${a}`, target: `n${b}`, weight: 0.3 + rng.next() * 0.7 });
+  }
+  return { nodes, links };
+}
+
+const view = new GraphView({
+  container: app,
+  theme: darkTheme,
+  simulation: { seed: 20260824 },
+  canvas: { maxLabels: 180 },
+});
+window.view = view; // for the benchmark harness
+
+let count = 1651;
+function rebuild() {
+  for (const id of [...view.graph.ids]) view.graph.removeNode(id);
+  view.load(synth(count), { fit: true });
+  // Frame it again once the layout actually exists — the load-time fit sees the
+  // pre-physics knot, not the arrangement.
+  view.fitWhenSettled();
+  legend.rebuild();
+}
+
+// ---------------------------------------------------------------- controls
+const panel = el('div', { class: 'panel' });
+panel.appendChild(el('h1', {}, 'graph-engine'));
+panel.appendChild(el('p', { class: 'sub' }, 'synthetic graph · reproducible from a seed'));
+
+const sizeSection = el('section');
+sizeSection.appendChild(el('h2', {}, 'size'));
+for (const n of [500, 1651, 2864, 6000, 12000]) {
+  sizeSection.appendChild(button(String(n), () => { count = n; rebuild(); }));
+}
+panel.appendChild(sizeSection);
+
+const search = el('input', { type: 'search', placeholder: 'filter by label…' });
+let mode = 'hide';
+search.addEventListener('input', () => {
+  const f = search.value.trim() ? Filters.search(search.value) : null;
+  if (mode === 'hide') { view.highlight(null); view.filter(f); }
+  else { view.filter(null); view.highlight(f); }
+});
+const filterSection = el('section');
+filterSection.appendChild(el('h2', {}, 'filter'));
+filterSection.appendChild(search);
+filterSection.appendChild(el('div', { style: { height: '6px' } }));
+filterSection.appendChild(checkbox('dim instead of hide', false, (on) => {
+  mode = on ? 'dim' : 'hide';
+  search.dispatchEvent(new Event('input'));
+}));
+filterSection.appendChild(el('p', { class: 'hint' },
+  'Hidden nodes keep their coordinates and leave the physics entirely. Clear the box and they come back exactly where they were.'));
+panel.appendChild(filterSection);
+
+const forceSection = el('section');
+forceSection.appendChild(el('h2', {}, 'forces'));
+forceSection.appendChild(control('repulsion', slider({
+  min: 0, max: 4, step: 0.1, value: 1,
+  onInput: (v) => { view.simulation.force('manyBody').scale = v; view.simulation.reheat(0.3); },
+})));
+forceSection.appendChild(control('link length', slider({
+  min: 10, max: 160, step: 2, value: 44,
+  onInput: (v) => { view.simulation.force('link').distance = v; view.simulation.reheat(0.3); },
+})));
+forceSection.appendChild(control('theta', slider({
+  min: 0, max: 1.5, step: 0.05, value: 0.9,
+  onInput: (v) => { view.simulation.force('manyBody').theta = v; },
+})));
+forceSection.appendChild(checkbox('collision', true, (on) => {
+  view.simulation.force('collide').enabled = on; view.simulation.reheat(0.3);
+}));
+forceSection.appendChild(checkbox('show quadtree', false, (on) => {
+  view.renderer.showQuadtree = on;
+}));
+panel.appendChild(forceSection);
+
+const legendSection = el('section');
+legendSection.appendChild(el('h2', {}, 'node type'));
+const hiddenTypes = new Set();
+const legend = makeLegend(view, (label, node) => {
+  const off = node.dataset.off === '1';
+  node.dataset.off = off ? '0' : '1';
+  if (off) hiddenTypes.delete(label); else hiddenTypes.add(label);
+  const keep = [...new Set(view.graph.types)].filter((t) => !hiddenTypes.has(t || '(untyped)'));
+  view.filter(hiddenTypes.size ? Filters.ofType(...keep) : null);
+});
+legendSection.appendChild(legend.box);
+panel.appendChild(legendSection);
+
+const actions = el('section');
+actions.appendChild(el('h2', {}, 'actions'));
+actions.appendChild(button('fit', () => view.fit()));
+actions.appendChild(button('reheat', () => view.simulation.reheat(1)));
+actions.appendChild(button('theme', () => {
+  view.theme = view.theme.name === 'dark' ? lightTheme : darkTheme;
+  document.body.style.background = view.theme.background;
+  legend.rebuild();
+}));
+panel.appendChild(actions);
+
+panel.appendChild(el('p', { class: 'hint' }, [
+  'drag a node — the rest respond · ',
+  el('kbd', {}, 'double-click'), ' pin/unpin · ',
+  el('kbd', {}, 'shift-drag'), ' marquee select · ',
+  el('kbd', {}, 'p'), ' pin selection · ',
+  el('kbd', {}, 'f'), ' fit · scroll to zoom',
+]));
+
+app.appendChild(panel);
+app.appendChild(makeHud(view));
+
+rebuild();
+view.start();
+</script>
+</body>
+</html>

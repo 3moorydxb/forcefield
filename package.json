@@ -1,0 +1,35 @@
+{
+  "name": "graph-engine",
+  "version": "0.1.0",
+  "description": "A dependency-free force-directed graph engine: Barnes-Hut many-body simulation, velocity-Verlet integration, drag/pin/filter/zoom, behind a swappable renderer interface.",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    ".": "./dist/index.js",
+    "./core": "./dist/core/index.js",
+    "./render": "./dist/render/index.js"
+  },
+  "types": "./dist/index.d.ts",
+  "files": ["dist", "README.md", "LICENSE"],
+  "sideEffects": false,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:test": "tsc -p tsconfig.test.json",
+    "test": "npm run build:test && node --test build-test/test/*.test.js",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "serve": "python3 -m http.server 8902",
+    "clean": "rm -rf dist build-test"
+  },
+  "keywords": [
+    "graph",
+    "force-directed",
+    "barnes-hut",
+    "quadtree",
+    "network",
+    "visualization",
+    "canvas"
+  ],
+  "dependencies": {},
+  "devDependencies": {}
+}

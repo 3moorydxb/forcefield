@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "build-test",
+    "declaration": false,
+    "declarationMap": false,
+    "noUnusedLocals": false,
+    "types": []
+  },
+  "include": ["src", "test"]
+}

@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>graph-engine — hierarchy, real data</title>
+<style id="base"></style>
+</head>
+<body>
+<div id="app"></div>
+
+<script type="module">
+import { GraphView, Filters, darkTheme, lightTheme } from '../../dist/index.js';
+import { BASE_CSS, el, makeHud, makeLegend, control, slider, button, checkbox } from '../shared/ui.mjs';
+
+document.getElementById('base').textContent = BASE_CSS;
+const app = document.getElementById('app');
+
+/**
+ * The hierarchy case: a large tree whose coordinates were saved by something
+ * else, loaded as a STARTING STATE rather than a final answer.
+ *
+ * The data file is produced by `examples/adapters/markdown-tree.mjs` and is
+ * .gitignored — it is one person's notes. Run the adapter against any folder of
+ * markdown with a parent field and this page works unchanged.
+ */
+const DATA = new URLSearchParams(location.search).get('data') ?? 'edith.graph.json';
+
+const view = new GraphView({
+  container: app,
+  theme: darkTheme,
+  simulation: { seed: 20260824 },
+  canvas: { maxLabels: 140, labelZoom: 0.7 },
+});
+window.view = view;
+
+const panel = el('div', { class: 'panel' });
+const status = el('p', { class: 'status' }, 'loading…');
+panel.appendChild(el('h1', {}, 'hierarchy'));
+panel.appendChild(el('p', { class: 'sub' }, DATA));
+panel.appendChild(status);
+app.appendChild(panel);
+app.appendChild(makeHud(view));
+
+const res = await fetch(DATA);
+if (!res.ok) {
+  // No fixture, no fallback, no demo seed. A missing file says so.
+  status.textContent = `could not load ${DATA} (${res.status}). Run the adapter first — see examples/adapters/README.md.`;
+  throw new Error(`missing ${DATA}`);
+}
+const data = await res.json();
+
+view.load(data, { fit: true, alpha: 0.4 });
+
+/**
+ * Saved coordinates cover only part of this vault. The rest arrive at a random
+ * point near the origin, so they are seeded next to whatever they are attached
+ * to and left for the simulation to place — which is the whole reason this is a
+ * simulation and not a coordinate replay.
+ */
+const unplaced = data.meta?.unpositioned ?? [];
+for (let pass = 0; pass < 6; pass++) {
+  for (const id of unplaced) view.graph.seedNearNeighbours(id, 24);
+}
+view.fit();
+view.fitWhenSettled();
+
+status.textContent =
+  `${view.graph.nodeCount} nodes · ${view.graph.linkCount} links · ` +
+  `${view.graph.nodeCount - unplaced.length} with saved positions, ${unplaced.length} laid out here`;
+
+// ------------------------------------------------------------------ filters
+let branchRoot = null;
+let depth = Infinity;
+let dimMode = false;
+
+function currentFilter() {
+  const parts = [];
+  if (branchRoot) {
+    parts.push(Filters.branch(branchRoot, { direction: 'out', maxDepth: depth }));
+  }
+  if (search.value.trim()) parts.push(Filters.search(search.value));
+  if (hiddenTypes.size) {
+    const keep = [...new Set(view.graph.types)].filter((t) => !hiddenTypes.has(t || '(untyped)'));
+    parts.push(Filters.ofType(...keep));
+  }
+  return parts.length === 0 ? null : parts.length === 1 ? parts[0] : Filters.and(...parts);
+}
+
+function apply() {
+  const f = currentFilter();
+  if (dimMode) { view.filter(null); view.highlight(f); }
+  else { view.highlight(null); const s = view.filter(f); showing.textContent = `${s.visible} shown`; }
+  if (!f) showing.textContent = `${view.graph.nodeCount} shown`;
+}
+
+const branchSection = el('section');
+branchSection.appendChild(el('h2', {}, 'branch'));
+const branchName = el('div', { class: 'hint' }, 'click a node to isolate its subtree');
+branchSection.appendChild(branchName);
+branchSection.appendChild(el('div', { style: { height: '6px' } }));
+branchSection.appendChild(control('depth', slider({
+  min: 1, max: 12, step: 1, value: 12,
+  onInput: (v) => { depth = v >= 12 ? Infinity : v; apply(); },
+})));
+branchSection.appendChild(button('whole graph', () => {
+  branchRoot = null; branchName.textContent = 'click a node to isolate its subtree'; apply();
+}));
+panel.appendChild(branchSection);
+
+const search = el('input', { type: 'search', placeholder: 'search labels…' });
+search.addEventListener('input', apply);
+const showing = el('p', { class: 'status' }, '');
+const searchSection = el('section');
+searchSection.appendChild(el('h2', {}, 'search'));
+searchSection.appendChild(search);
+searchSection.appendChild(showing);
+searchSection.appendChild(checkbox('dim instead of hide', false, (on) => { dimMode = on; apply(); }));
+panel.appendChild(searchSection);
+
+const hiddenTypes = new Set();
+const legendSection = el('section');
+legendSection.appendChild(el('h2', {}, 'node type'));
+const legend = makeLegend(view, (label, node) => {
+  const off = node.dataset.off === '1';
+  node.dataset.off = off ? '0' : '1';
+  if (off) hiddenTypes.delete(label); else hiddenTypes.add(label);
+  apply();
+});
+legendSection.appendChild(legend.box);
+panel.appendChild(legendSection);
+
+const actions = el('section');
+actions.appendChild(el('h2', {}, 'actions'));
+actions.appendChild(button('fit', () => view.fit()));
+actions.appendChild(button('reheat', () => view.simulation.reheat(0.6)));
+actions.appendChild(button('theme', () => {
+  view.theme = view.theme.name === 'dark' ? lightTheme : darkTheme;
+  document.body.style.background = view.theme.background;
+  legend.rebuild();
+}));
+panel.appendChild(actions);
+
+panel.appendChild(el('p', { class: 'hint' }, [
+  el('kbd', {}, 'click'), ' isolate subtree · ',
+  el('kbd', {}, 'double-click'), ' pin · ',
+  el('kbd', {}, 'shift-drag'), ' marquee · scroll to zoom',
+]));
+
+view.controller.on('nodeclick', (id) => {
+  branchRoot = id;
+  branchName.textContent = view.graph.node(id)?.label ?? id;
+  apply();
+});
+
+apply();
+view.start();
+</script>
+</body>
+</html>

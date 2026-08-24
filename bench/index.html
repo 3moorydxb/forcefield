@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>graph-engine — benchmark</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #1a1a19; color: #c3c2b7;
+    font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #app { position: fixed; inset: 0; }
+  #out { position: absolute; top: 12px; left: 12px; padding: 12px 14px; border-radius: 10px;
+    background: #21211fee; border: 1px solid #383835; white-space: pre; color: #fff;
+    font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<pre id="out">starting…</pre>
+
+<script type="module">
+import { GraphView, Rng } from '../dist/index.js';
+
+/**
+ * Fixed-protocol benchmark. No eyeballing.
+ *
+ * Query params:
+ *   n=1651        node count
+ *   mode=running  hold the simulation at a constant temperature so every frame
+ *                 pays for physics AND rendering (the honest worst case)
+ *   mode=settled  measure the render loop alone, after the layout has converged
+ *   warmup=120    frames discarded before measuring
+ *   frames=600    frames measured
+ *
+ * The graph is generated from a seed, so anyone can reproduce the same numbers
+ * on their own machine without any data.
+ */
+const q = new URLSearchParams(location.search);
+const N = parseInt(q.get('n') ?? '1651', 10);
+const MODE = q.get('mode') ?? 'running';
+const WARMUP = parseInt(q.get('warmup') ?? '120', 10);
+const FRAMES = parseInt(q.get('frames') ?? '600', 10);
+const LABELS = q.get('labels') !== '0';
+
+function synth(nodeCount, seed = 20260824) {
+  const rng = new Rng(seed);
+  const kinds = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta'];
+  const nodes = [];
+  const links = [];
+  const clusters = Math.max(1, Math.round(Math.sqrt(nodeCount) / 2));
+  for (let i = 0; i < nodeCount; i++) {
+    nodes.push({
+      id: `n${i}`, label: `node ${i}`,
+      type: kinds[Math.floor(rng.next() * clusters) % kinds.length],
+      radius: 3 + rng.next() * 4,
+    });
+  }
+  for (let i = 1; i < nodeCount; i++) {
+    links.push({ source: `n${Math.floor(rng.next() * i)}`, target: `n${i}`, weight: 1 });
+  }
+  for (let i = 0; i < nodeCount * 0.4; i++) {
+    const a = Math.floor(rng.next() * nodeCount);
+    const b = Math.floor(rng.next() * nodeCount);
+    if (a !== b) links.push({ source: `n${a}`, target: `n${b}`, weight: 0.3 + rng.next() * 0.7 });
+  }
+  return { nodes, links };
+}
+
+const view = new GraphView({
+  container: document.getElementById('app'),
+  simulation: { seed: 20260824 },
+  canvas: LABELS ? {} : { maxLabels: 0, labelZoom: 999 },
+});
+// Benchmarks measure drawing, so the skip-when-nothing-changed optimisation is
+// switched off here. Leaving it on would report the cost of NOT rendering.
+view.redrawPolicy = 'always';
+window.view = view;
+
+const data = q.get('data');
+if (data) {
+  const res = await fetch(data);
+  if (!res.ok) throw new Error(`bench: could not load ${data} (${res.status})`);
+  const json = await res.json();
+  view.load(json, { fit: false, alpha: 1 });
+  for (let pass = 0; pass < 6; pass++) {
+    for (const id of json.meta?.unpositioned ?? []) view.graph.seedNearNeighbours(id, 24);
+  }
+} else {
+  view.load(synth(N), { fit: false });
+}
+
+const out = document.getElementById('out');
+const result = { pending: true };
+window.benchResult = result;
+
+// Converge first so the measurement is of a real layout, not of the opening
+// explosion — which is both easier (everything is on top of everything, so the
+// quadtree is shallow) and unrepresentative.
+let guard = 0;
+while (!view.simulation.settled && guard++ < 4000) view.simulation.tick(1);
+view.fit();
+out.textContent = `converged in ${guard} ticks\nmeasuring ${FRAMES} frames…`;
+
+if (MODE === 'running') {
+  // Hold the temperature up so every measured frame does physics as well as
+  // drawing. A settled graph flatters the numbers by skipping the tick entirely.
+  view.simulation.alphaTarget = 0.3;
+  view.simulation.reheat(0.3);
+}
+
+let frame = 0;
+view.meter.reset();
+function loop(t) {
+  view.frame(t);
+  frame++;
+  if (frame === WARMUP) view.meter.reset();
+  if (frame < WARMUP + FRAMES) {
+    requestAnimationFrame(loop);
+    return;
+  }
+  const s = view.stats();
+  const r = view.renderer.stats;
+  Object.assign(result, {
+    pending: false,
+    mode: MODE, labels: LABELS,
+    nodes: view.graph.nodeCount,
+    links: view.graph.linkCount,
+    convergedInTicks: guard,
+    fps: +s.fps.toFixed(1),
+    low1: +s.low1.toFixed(1),
+    simMs: +s.simMs.toFixed(3),
+    renderMs: +s.renderMs.toFixed(3),
+    frameMs: +(s.simMs + s.renderMs).toFixed(3),
+    nodesDrawn: r.nodesDrawn,
+    linksDrawn: r.linksDrawn,
+    labelsDrawn: r.labelsDrawn,
+    dpr: Math.min(2, devicePixelRatio || 1),
+    viewport: `${innerWidth}x${innerHeight}`,
+  });
+  out.textContent = Object.entries(result)
+    .filter(([k]) => k !== 'pending')
+    .map(([k, v]) => `${k.padEnd(18)} ${v}`)
+    .join('\n');
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
